@@ -1,0 +1,62 @@
+services:
+  db:
+    image: mysql:8.4
+    command:
+      - mysqld
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      MYSQL_DATABASE: rwa_monitor
+      MYSQL_USER: rwa
+      MYSQL_PASSWORD: rwa
+      MYSQL_ROOT_PASSWORD: root
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    ports:
+      - 3307:3306
+    volumes:
+      - db-data:/var/lib/mysql
+    restart: unless-stopped
+
+  backend:
+    image: rwamonitor-backend
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+      args:
+        BACKEND_ENV_FILE: backend/.env
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: mysql+pymysql://rwa:rwa@db:3306/rwa_monitor?charset=utf8mb4
+      FRONTEND_ORIGINS: http://localhost:3025,http://localhost:8085
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - 8025:8000
+    restart: unless-stopped
+
+  frontend:
+    image: rwamonitor-frontend
+    build:
+      context: .
+      dockerfile: ./frontend/Dockerfile
+      args:
+        FRONTEND_BASE_PATH: /
+        FRONTEND_API_BASE_URL: ""
+    depends_on:
+      backend:
+        condition: service_started
+    ports:
+      - 8085:80
+    restart: unless-stopped
+
+volumes:
+  db-data:
