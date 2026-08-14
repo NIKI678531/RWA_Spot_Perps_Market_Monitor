@@ -2,13 +2,13 @@
   "name": "rwa-spot-perps-market-monitor",
   "version": "0.1.0",
   "description": "Tokenized RWA market monitor — spot scale, venue/issuer competition, perps demand, anomaly detection",
-  "homepage": "https://github.com/niki678531/RWA_Spot_Perps_Market_Monitor#readme",
+  "homepage": "https://github.com/NIKI678531/RWA_Spot_Perps_Market_Monitor#readme",
   "bugs": {
-    "url": "https://github.com/niki678531/RWA_Spot_Perps_Market_Monitor/issues"
+    "url": "https://github.com/NIKI678531/RWA_Spot_Perps_Market_Monitor/issues"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/niki678531/RWA_Spot_Perps_Market_Monitor.git"
+    "url": "git+https://github.com/NIKI678531/RWA_Spot_Perps_Market_Monitor.git"
   },
   "license": "ISC",
   "author": "",
