@@ -243,7 +243,7 @@ severity = w1·norm(robust_z) + w2·norm(log10 绝对USD量) + w3·persistence
 
 ## 5. API 设计
 
-统一挂在 `settings.normalized_api_base_path` 下（沿用 DA-Report 约定）。
+统一挂在 `settings.normalized_api_base_path` 下。
 
 ```
 # 概览
