@@ -17,6 +17,7 @@ dependencies = [
     "numpy>=2.1.0",
     "openpyxl>=3.1.5",
     "pandas>=2.2.3",
+    "pydantic-settings>=2.6.0",
     "pymysql>=1.1.2",
     "python-docx>=1.2.0",
     "sqlalchemy>=2.0.47",
@@ -28,6 +29,7 @@ dev = [
     "black>=26.3.1",
     "mypy>=1.11.2",
     "pytest>=8.3.3",
+    "types-openpyxl>=3.1.5",
 ]
 
 [tool.black]
@@ -55,6 +57,12 @@ warn_unused_configs = true
 exclude = [
     "^frontend/",
 ]
+
+# APScheduler ships no py.typed marker and no stubs exist on PyPI. The scheduler
+# module is the only place it is touched, and its job callables are typed here.
+[[tool.mypy.overrides]]
+module = "apscheduler.*"
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 addopts = "-q"

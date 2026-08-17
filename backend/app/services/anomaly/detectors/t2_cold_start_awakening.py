@@ -1,4 +1,4 @@
-"""Cold-start awakening detector.
+"""T2 · Cold-start awakening detector.
 
 Fires when a product that essentially nobody traded starts trading meaningfully —
 "原先没有人买的产品现在突然多了很多人买". This is the flagship detector: it surfaces
@@ -64,9 +64,9 @@ def detect(
 ) -> AwakeningSignal | None:
     """Return a signal if ``entity_id`` just woke up, else ``None``.
 
-    ``history`` and ``baseline`` must both be restricted to the same day type as the
-    current observation — comparing a weekday print against a weekend-inclusive
-    baseline is the single largest source of false positives in this system.
+    ``history`` and ``baseline`` must both be restricted to the same market session
+    as the current observation — comparing a regular-hours print against a baseline
+    that includes weekends is the single largest source of false positives here.
     """
     if not baseline.is_alertable:
         # Insufficient history. Record upstream, but do not alert on a baseline we
@@ -81,7 +81,7 @@ def detect(
 
     dormant = sum(1 for v in history if v <= DORMANCY_CEILING_USD)
     if dormant / len(history) < DORMANCY_RATIO:
-        # It was already trading. A jump here is a volume spike, which is A1's job —
+        # It was already trading. A jump here is a volume spike, which is T1's job —
         # keeping the two separate stops "grew 3x" and "came from nothing" landing in
         # the feed as the same kind of event.
         return None

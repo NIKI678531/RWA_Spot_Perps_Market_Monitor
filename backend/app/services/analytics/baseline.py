@@ -2,58 +2,46 @@
 
 Two decisions here carry most of the signal quality:
 
-1. **Day-type stratification.** RWA tokens trade 24/7; their underlyings do not.
-   Weekend turnover is structurally lower, so a single blended baseline fires on
-   every Monday open. Baselines key on ``(entity, metric, day_type)``.
+1. **Session stratification.** RWA tokens trade 24/7; their underlyings do not.
+   Weekend turnover is structurally lower than weekday turnover, and after-hours
+   turnover is structurally lower than regular-hours turnover. A single blended
+   baseline fires on every Monday open and every US close, so baselines key on
+   ``(entity, metric, market_session)``.
 
 2. **Median + MAD instead of mean + stdev.** RWA volume is extremely right-skewed —
    in the 2026-08-09 snapshot the top 10 Binance TradFi contracts carried 78.2% of
    volume, and one contract (SPCX) carried 28.2% alone. A mean absorbs the spike it
    is supposed to detect; the median does not.
+
+See ``docs/adr/0002-baseline-stratification-and-robust-statistics.md``.
 """
 
 from __future__ import annotations
 
 import statistics
 from dataclasses import dataclass
-from datetime import date, datetime
-from enum import StrEnum
 from typing import Sequence
+
+from app.core.sessions import MarketSession
 
 #: Scaling constant making MAD a consistent estimator of stdev for normal data,
 #: so the resulting score is interpretable on the familiar z-score scale.
 _MAD_TO_SIGMA = 0.6745
 
-#: Below this many observations the baseline is not trustworthy. Detectors record
-#: but do not alert, so the first two weeks after deployment do not spam the feed.
+#: Below this many *same-session* observations the baseline is not trustworthy.
+#: Detectors record but do not alert, so the first two weeks after deployment do not
+#: spam the feed. Cross-sectional detectors (X1-X7) exist to cover this window.
 MIN_SAMPLES_FOR_ALERT = 14
-
-
-class DayType(StrEnum):
-    """Trading-calendar bucket of the underlying market."""
-
-    WEEKDAY = "weekday"
-    WEEKEND = "weekend"
-    US_HOLIDAY = "us_holiday"
-
-
-def classify_day(when: datetime, us_holidays: frozenset[date] = frozenset()) -> DayType:
-    """Bucket a snapshot timestamp by the underlying market's calendar."""
-    if when.date() in us_holidays:
-        return DayType.US_HOLIDAY
-    if when.weekday() >= 5:  # Saturday, Sunday
-        return DayType.WEEKEND
-    return DayType.WEEKDAY
 
 
 @dataclass(frozen=True, slots=True)
 class Baseline:
-    """Robust location and scale for one (entity, metric, day_type) series."""
+    """Robust location and scale for one (entity, metric, market_session) series."""
 
     median: float
     mad: float
     sample_size: int
-    day_type: DayType
+    market_session: MarketSession
 
     @property
     def is_alertable(self) -> bool:
@@ -75,11 +63,11 @@ class Baseline:
 
 
 def compute_baseline(
-    observations: Sequence[float], day_type: DayType
+    observations: Sequence[float], market_session: MarketSession
 ) -> Baseline | None:
-    """Build a baseline from same-day-type historical observations.
+    """Build a baseline from observations taken in the same market session.
 
-    ``observations`` must already be filtered to one day type; mixing them is the
+    ``observations`` must already be filtered to one session; mixing them is the
     failure mode this module exists to prevent. Returns ``None`` for an empty series.
     """
     if not observations:
@@ -91,5 +79,5 @@ def compute_baseline(
         median=median,
         mad=mad,
         sample_size=len(observations),
-        day_type=day_type,
+        market_session=market_session,
     )
