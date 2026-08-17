@@ -22,9 +22,13 @@ def pools(
     asset_id: str | None = Query(default=None),
     limit: Limit = 200,
 ) -> PoolList:
+    # ``scoped_pools``, not ``pools``: GeckoTerminal search returns every pool whose
+    # name matched the query, so the unmapped remainder is unidentified liquidity
+    # rather than tokenized-asset liquidity, and ranking it here would put it in front
+    # of a reader as if it were the latter.
     selected = [
         row
-        for row in data.pools
+        for row in data.scoped_pools
         if (network is None or row.pool.network == network)
         and (dex is None or row.pool.dex == dex)
         and (asset_id is None or row.pool.base_asset_id == asset_id)

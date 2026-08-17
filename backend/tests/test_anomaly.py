@@ -276,20 +276,38 @@ class TestX3VolLiqRatio:
 
 
 class TestX4NewPairListing:
+    #: Any prior snapshot at all. What matters is that it is not empty — see the
+    #: cold-start test below.
+    KNOWN = {("QQQB", "binance")}
+
     def test_a_first_sighting_with_real_volume_is_a_distribution_signal(self) -> None:
         pairs = [x4.PairObservation("SPYB", "binance", Decimal("900000"))]
-        signals = x4.detect(pairs, known_pairs=set(), market_session=MarketSession.RTH)
+        signals = x4.detect(
+            pairs, known_pairs=self.KNOWN, market_session=MarketSession.RTH
+        )
 
         assert [s.entity_id for s in signals] == ["SPYB@binance"]
         assert signals[0].evidence.robust_z is None
 
     def test_an_announcement_nobody_traded_is_not_a_signal(self) -> None:
         pairs = [x4.PairObservation("SPYB", "binance", Decimal("1000"))]
-        assert x4.detect(pairs, set(), MarketSession.RTH) == []
+        assert x4.detect(pairs, self.KNOWN, MarketSession.RTH) == []
 
     def test_a_pair_seen_before_is_not_new(self) -> None:
         pairs = [x4.PairObservation("SPYB", "binance", Decimal("900000"))]
         assert x4.detect(pairs, {("SPYB", "binance")}, MarketSession.RTH) == []
+
+    def test_the_first_ever_snapshot_reports_nothing_as_newly_listed(self) -> None:
+        """No known pairs means no history, not a market where everything is new.
+
+        Without this the first collection pass would alert on every pair in the feed at
+        once — the loudest possible day, and every one of them wrong.
+        """
+        pairs = [
+            x4.PairObservation("SPYB", "binance", Decimal("900000")),
+            x4.PairObservation("AAPLX", "kraken", Decimal("2400000")),
+        ]
+        assert x4.detect(pairs, set(), MarketSession.RTH) == []
 
 
 class TestAlertLifecycle:

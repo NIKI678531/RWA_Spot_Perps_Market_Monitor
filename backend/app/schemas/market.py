@@ -173,6 +173,10 @@ class PerpVenueRow(BaseModel):
     vol_24h: Amount
     open_interest_usd: Amount
     symbol_count: int | None = None
+    #: How many of those symbols the open-interest total covers. Below symbol_count the
+    #: total is a floor: some venues charge one request per symbol for open interest and
+    #: the collector stops before the tail.
+    oi_symbol_count: int | None = None
 
 
 class PerpVenueList(BaseModel):
@@ -206,7 +210,12 @@ class PerpContractList(BaseModel):
 class PerpDexRow(BaseModel):
     perp_dex: str
     is_hip3: bool
+    #: Contracts resolving to a real-world underlying — what the amounts are summed
+    #: over.
     contract_count: int
+    #: Every contract seen on the deployment. A deployment with contracts but none in
+    #: scope is a launch we have observed and not yet classified, not an empty one.
+    observed_contract_count: int
     vol_24h: Amount
     open_interest_usd: Amount
 

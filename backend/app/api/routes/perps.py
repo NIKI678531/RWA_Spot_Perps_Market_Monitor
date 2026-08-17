@@ -50,6 +50,7 @@ def venues(data: DatasetDep) -> PerpVenueList:
             vol_24h=Amount.raw(snapshot.vol_24h, _VOL),
             open_interest_usd=Amount.raw(snapshot.open_interest_usd, _OI),
             symbol_count=snapshot.symbol_count,
+            oi_symbol_count=snapshot.oi_symbol_count,
         )
         for snapshot in sorted(
             data.perp_venues,
@@ -80,9 +81,12 @@ def contracts(
     underlying_id: str | None = Query(default=None),
     limit: Limit = 200,
 ) -> PerpContractList:
+    # ``scoped_perp_contracts``: the collectors enumerate whole exchanges, so this list
+    # would otherwise be ranked by Hyperliquid's BTC book and no tokenized-equity
+    # contract would appear near the top of it.
     selected = [
         row
-        for row in data.perp_contracts
+        for row in data.scoped_perp_contracts
         if (exchange is None or row.exchange == exchange)
         and (perp_dex is None or (row.perp_dex or _CORE) == perp_dex)
         and (
@@ -138,15 +142,25 @@ def contracts(
 
 @router.get("/perps/dexs", response_model=PerpDexList)
 def perp_dexs(data: DatasetDep) -> PerpDexList:
-    """Every perp DEX we saw contracts on, HIP-3 deployments included."""
-    volumes = group_sum(
-        data.perp_contracts, _dex_key, lambda r: r.snapshot.vol_24h, _VOL
-    )
-    interest = group_sum(
-        data.perp_contracts, _dex_key, lambda r: r.snapshot.oi_usd, _OI
-    )
-    counts: dict[str, int] = {}
+    """Every perp DEX we saw contracts on, HIP-3 deployments included.
+
+    Two counts, deliberately. The *rows* are enumerated from every observed contract,
+    because a deployment we cannot yet classify is precisely the thing this endpoint
+    exists to surface — gating the row list would hide a competitor's launch until
+    someone got round to mapping its symbols. The *money* is summed over in-scope
+    contracts only, because a rollup mixing tokenized equity with the BTC book is not
+    a figure about the RWA market.
+    """
+    scoped_rows = data.scoped_perp_contracts
+    volumes = group_sum(scoped_rows, _dex_key, lambda r: r.snapshot.vol_24h, _VOL)
+    interest = group_sum(scoped_rows, _dex_key, lambda r: r.snapshot.oi_usd, _OI)
+
+    observed: dict[str, int] = {}
     for row in data.perp_contracts:
+        key = _dex_key(row)
+        observed[key] = observed.get(key, 0) + 1
+    counts: dict[str, int] = {}
+    for row in scoped_rows:
         key = _dex_key(row)
         counts[key] = counts.get(key, 0) + 1
 
@@ -155,10 +169,11 @@ def perp_dexs(data: DatasetDep) -> PerpDexList:
             perp_dex=key,
             is_hip3=_is_hip3(key),
             contract_count=counts.get(key, 0),
-            vol_24h=Amount.of(volumes[key]),
+            observed_contract_count=observed[key],
+            vol_24h=Amount.of(volumes.get(key, scoped(None, _VOL))),
             open_interest_usd=Amount.of(interest.get(key, scoped(None, _OI))),
         )
-        for key in sort_by_amount(list(volumes), volumes)
+        for key in sort_by_amount(list(observed), volumes)
     ]
     return PerpDexList(
         meta=Meta(
@@ -167,7 +182,10 @@ def perp_dexs(data: DatasetDep) -> PerpDexList:
             note=(
                 "HIP-3 lets anyone deploy an independent perp DEX under one exchange. "
                 "Aggregators list a Top 25 and cannot see a permissionless deployment, "
-                "so this list is enumerated from the exchange. " + _SCOPE_NOTE
+                "so this list is enumerated from the exchange. contract_count counts "
+                "the contracts that resolve to a real-world underlying and is what the "
+                "amounts are summed over; observed_contract_count counts everything on "
+                "the deployment. " + _SCOPE_NOTE
             ),
             row_count=len(rows),
         ),

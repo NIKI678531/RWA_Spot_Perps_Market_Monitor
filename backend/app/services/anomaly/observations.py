@@ -116,8 +116,8 @@ def known_pairs(session: Session, snapshot_ts: datetime) -> set[tuple[str, str]]
 
     Strictly before: including the current snapshot would make every pair known and
     X4 would never fire. On the very first collection this set is empty, which would
-    report the entire market as newly listed — the caller guards that by running
-    detection only once history exists.
+    report the entire market as newly listed; X4 treats an empty set as "no history"
+    and stays silent rather than trusting it.
     """
     stmt = (
         select(FactPairSnapshot.asset_id, FactPairSnapshot.venue_id)

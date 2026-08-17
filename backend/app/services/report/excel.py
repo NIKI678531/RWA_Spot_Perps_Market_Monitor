@@ -529,7 +529,7 @@ def _dex_pools(data: ReportDataset) -> SheetSpec:
             row.snapshot.sells_24h,
             _buy_ratio(row.snapshot.buys_24h, row.snapshot.sells_24h),
         ]
-        for row in data.pools
+        for row in data.scoped_pools
     ]
     return SheetSpec(
         name="10_DEX_Pools",
@@ -559,12 +559,13 @@ def _dex_liquidity(data: ReportDataset) -> SheetSpec:
     def key(row: Any) -> str:
         return f"{row.pool.network} / {row.pool.dex}"
 
+    pools = data.scoped_pools
     reserves = group_sum(
-        data.pools, key, lambda r: r.snapshot.reserve_usd, MetricScope.DEX_LIQUIDITY
+        pools, key, lambda r: r.snapshot.reserve_usd, MetricScope.DEX_LIQUIDITY
     )
-    volumes = group_sum(data.pools, key, lambda r: r.snapshot.vol_24h, SPOT)
+    volumes = group_sum(pools, key, lambda r: r.snapshot.vol_24h, SPOT)
     counts: dict[str, int] = {}
-    for row in data.pools:
+    for row in pools:
         counts[key(row)] = counts.get(key(row), 0) + 1
 
     rows = [
@@ -609,6 +610,7 @@ def _perp_venues(data: ReportDataset) -> SheetSpec:
             snapshot.vol_24h,
             snapshot.open_interest_usd,
             snapshot.symbol_count,
+            snapshot.oi_symbol_count,
         ]
         for snapshot in sorted(
             data.perp_venues,
@@ -624,27 +626,29 @@ def _perp_venues(data: ReportDataset) -> SheetSpec:
             "vol_24h",
             "open_interest_usd",
             "symbol_count",
+            "oi_symbol_count",
         ],
         rows=rows,
         note=(
             "vol_24h is a flow and open_interest_usd is a stock. Charting them on one "
-            "axis invites a comparison that does not exist."
+            "axis invites a comparison that does not exist. Where oi_symbol_count is "
+            "below symbol_count, open_interest_usd covers only that many contracts and "
+            "is a floor: the source charges one request per symbol for it."
         ),
         scopes=[PERP_VOL, PERP_OI],
     )
 
 
 def _perp_contracts(data: ReportDataset) -> SheetSpec:
+    contracts = data.scoped_perp_contracts
     volumes = group_sum(
-        data.perp_contracts,
+        contracts,
         lambda r: r.snapshot.contract_id,
         lambda r: r.snapshot.vol_24h,
         MetricScope.PERP_VOLUME,
     )
-    keys = sort_by_amount(
-        [r.snapshot.contract_id for r in data.perp_contracts], volumes
-    )
-    by_id = {r.snapshot.contract_id: r for r in data.perp_contracts}
+    keys = sort_by_amount([r.snapshot.contract_id for r in contracts], volumes)
+    by_id = {r.snapshot.contract_id: r for r in contracts}
 
     rows = []
     for rank, key in enumerate(keys, start=1):
@@ -799,6 +803,7 @@ def _hl_hip3_contracts(data: ReportDataset) -> SheetSpec:
                 row.snapshot.mark_price,
                 row.snapshot.index_price,
                 row.contract.underlying_id if row.contract else None,
+                row.in_scope,
             ]
         )
     rows.sort(key=lambda r: (r[0], str(r[2])))
@@ -815,12 +820,16 @@ def _hl_hip3_contracts(data: ReportDataset) -> SheetSpec:
             "mark_price",
             "index_price",
             "underlying_id",
+            "in_scope",
         ],
         rows=rows,
         note=(
             "HIP-3 lets anyone deploy an independent perp DEX under one exchange. "
             "Aggregators list a Top 25 and cannot see a permissionless deployment at "
-            "all, so this sheet is enumerated from the exchange directly."
+            "all, so this sheet is enumerated from the exchange directly. The "
+            "enumeration is complete on purpose — a deployment we cannot yet classify "
+            "is the thing worth seeing — so filter on in_scope before totalling: the "
+            "other sheets already do, and the exchange's own BTC book is in here."
         ),
         scopes=[PERP_VOL, PERP_OI],
     )

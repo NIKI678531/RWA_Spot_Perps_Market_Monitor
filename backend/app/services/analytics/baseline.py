@@ -53,12 +53,20 @@ class Baseline:
 
         A zero MAD means the series was flat across the whole window — common for
         dormant assets sitting at ~0 volume, which is exactly the population the
-        cold-start detector cares about. Returning ``inf`` for any departure from a
-        flat baseline is the honest answer: the deviation is unbounded in MAD units.
-        Callers gate on absolute magnitude, so this does not by itself fire an alert.
+        cold-start detector cares about. Returning an infinite score for any departure
+        from a flat baseline is the honest answer: the deviation is unbounded in MAD
+        units. Callers gate on absolute magnitude, so this does not by itself fire an
+        alert.
+
+        The infinity keeps the *sign* of the move. An unsigned ``inf`` would make a
+        collapse to zero score identically to a spike, and every detector here is
+        directional — "nobody traded this, now everyone does" is the finding, not
+        "something changed".
         """
         if self.mad == 0:
-            return 0.0 if value == self.median else float("inf")
+            if value == self.median:
+                return 0.0
+            return float("inf") if value > self.median else float("-inf")
         return _MAD_TO_SIGMA * (value - self.median) / self.mad
 
 

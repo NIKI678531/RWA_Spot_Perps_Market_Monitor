@@ -62,7 +62,7 @@ def underlying(
     pairs = [p for p in data.scoped_pairs if p.snapshot.asset_id in wrapper_ids]
     perps = [
         r
-        for r in data.perp_contracts
+        for r in data.scoped_perp_contracts
         if r.contract and r.contract.underlying_id == underlying_id
     ]
 

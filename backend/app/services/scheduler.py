@@ -40,13 +40,13 @@ from app.core.config import settings
 from app.core.metrics import MetricScope
 from app.core.sessions import MarketSession
 from app.db.session import SessionLocal
-from app.models.enums import EntityType
+from app.models.enums import EntityType, FetchStatus
 from app.models.facts import FactAssetSnapshot, FactPerpContractSnapshot
 from app.models.operations import BaselineSnapshot
 from app.services.analytics.baseline import compute_baseline
 from app.services.anomaly.engine import build_default_engine
 from app.services.ingest import registry
-from app.services.ingest.base import Collector, record_fetches
+from app.services.ingest.base import Collector, FetchResult, record_fetches
 from app.services.ingest.binance import BinanceCollector
 from app.services.ingest.coingecko import CoinGeckoCollector
 from app.services.ingest.geckoterminal import GeckoTerminalCollector
@@ -235,16 +235,20 @@ def run_pass(
         for collector in collectors:
             try:
                 results = collector.collect(session, snapshot_ts)
-            except Exception:  # noqa: BLE001 - isolation is the point
+                # Inside the try with the collect itself: a constraint violation on
+                # flush is as much this collector's failure as a timeout is, and
+                # letting it escape here would cost the pass every collector after it.
+                record_fetches(session, snapshot_ts, results)
+                session.commit()
+            except Exception as error:  # noqa: BLE001 - isolation is the point
                 # A crashing collector costs its own rows and nothing else. The
                 # rollback is scoped to this collector's uncommitted work.
                 logger.exception("collector %s failed", collector.source_id)
                 session.rollback()
                 failures += 1
+                _record_collector_failure(session, snapshot_ts, collector, error)
                 continue
 
-            record_fetches(session, snapshot_ts, results)
-            session.commit()
             fetches += len(results)
             failures += sum(1 for r in results if not r.ok)
 
@@ -261,6 +265,43 @@ def run_pass(
         result.alerts_created,
     )
     return result
+
+
+def _record_collector_failure(
+    session: Session,
+    snapshot_ts: datetime,
+    collector: Collector,
+    error: BaseException,
+) -> None:
+    """Write the ``NOT_VERIFIED`` row the crashed collector never reached.
+
+    A collector that raises before returning its results leaves no trace in
+    ``fetch_log``, which makes a source that broke indistinguishable from a source
+    that was never scheduled — and those need opposite responses. The exception is
+    only in the application log, and the data-quality page does not read that.
+
+    Failing to record the failure must not itself abort the pass, so this swallows its
+    own errors after logging them.
+    """
+    try:
+        record_fetches(
+            session,
+            snapshot_ts,
+            [
+                FetchResult(
+                    source_id=collector.source_id,
+                    endpoint="collect",
+                    status=FetchStatus.NOT_VERIFIED,
+                    error=f"{type(error).__name__}: {error}"[:2000],
+                )
+            ],
+        )
+        session.commit()
+    except Exception:  # noqa: BLE001 - the pass matters more than the bookkeeping
+        logger.exception(
+            "could not record the failure of collector %s", collector.source_id
+        )
+        session.rollback()
 
 
 def _detect(session: Session, snapshot_ts: datetime, result: PassResult) -> PassResult:

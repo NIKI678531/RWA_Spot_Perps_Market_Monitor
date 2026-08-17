@@ -13,7 +13,10 @@
 **/*.dbmdl
 **/*.jfm
 **/bin
-**/charts
+# Helm charts at the root only. `**/charts` would also drop frontend/src/charts,
+# which is the chart layer the UI is built from.
+/charts
+frontend/dist
 **/docker-compose*
 **/compose*
 **/Dockerfile*

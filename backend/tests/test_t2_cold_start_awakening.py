@@ -79,6 +79,18 @@ def test_flat_series_yields_infinite_score_rather_than_dividing_by_zero() -> Non
     assert baseline.robust_z(300.0) == 0.0
 
 
+def test_the_infinite_score_keeps_the_direction_of_the_move() -> None:
+    """A collapse and a spike must not score identically.
+
+    Every detector reading this number is directional — an awakening looks for a jump,
+    an evaporation for a fall. An unsigned infinity would make a product that stopped
+    trading indistinguishable from one that suddenly did.
+    """
+    baseline = compute_baseline([300.0] * 20, MarketSession.RTH)
+    assert baseline is not None
+    assert baseline.robust_z(0.0) == float("-inf")
+
+
 def test_median_resists_the_spike_a_mean_would_absorb() -> None:
     """Right-skewed volume is why the baseline is median + MAD, not mean + stdev."""
     history = [300.0] * 19 + [50_000_000.0]

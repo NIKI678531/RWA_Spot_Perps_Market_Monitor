@@ -59,6 +59,8 @@ class PoolState:
     network: str
     dex: str
     address: str | None
+    #: The base leg of the pool name. What decides which asset the pool belongs to.
+    base_symbol: str | None
     quote_token: str | None
     reserve_usd: Decimal | None
     vol_24h: Decimal | None
@@ -101,26 +103,42 @@ class GeckoTerminalCollector(Collector):
 
                 # Two symbols can surface the same pool. Writing it twice would
                 # violate the fact table's composite primary key.
-                states = [
-                    s for s in _parse_pools(result.payload) if s.pool_id not in seen
-                ]
-                if not states:
-                    continue
-                seen.update(s.pool_id for s in states)
+                #
+                # ``/search/pools`` is a fuzzy string search: querying "AAPL" returns
+                # every pool whose name contains it, including other issuers' wrappers
+                # and unrelated tokens that happen to embed the letters. Attributing
+                # the whole result to the queried asset would credit one product with
+                # another's liquidity, so each pool is claimed by whichever known asset
+                # its base leg actually names. A pool whose base leg names nothing we
+                # know is dropped: an unidentified pool is not this asset's, and the
+                # docstring's coverage caveat already says the search is incomplete.
+                by_symbol = cache.assets_by_symbol()
+                owned: list[tuple[PoolState, DimAsset]] = []
+                for state in _parse_pools(result.payload):
+                    if state.pool_id in seen:
+                        continue
+                    owner = by_symbol.get((state.base_symbol or "").upper())
+                    if owner is None:
+                        continue
+                    owned.append((state, owner))
 
-                for state in states:
+                if not owned:
+                    continue
+                seen.update(state.pool_id for state, _ in owned)
+
+                for state, owner in owned:
                     cache.ensure_pool(
                         pool_id=state.pool_id,
                         network=state.network,
                         dex=state.dex,
                         pool_address=state.address,
-                        base_asset_id=asset.asset_id,
+                        base_asset_id=owner.asset_id,
                         quote_token=state.quote_token,
                     )
                 # The pool dimension rows must land before the facts pointing at them.
                 session.flush()
 
-                for state in states:
+                for state, _ in owned:
                     session.add(
                         FactPoolSnapshot(
                             pool_id=state.pool_id,
@@ -184,7 +202,8 @@ def _parse_pools(payload: Mapping[str, Any]) -> list[PoolState]:
                 network=_related(relationships, "network") or pool_id.split("_", 1)[0],
                 dex=_related(relationships, "dex") or "unknown",
                 address=attributes.get("address"),
-                quote_token=_quote_symbol(attributes.get("name")),
+                base_symbol=_leg(attributes.get("name"), 0),
+                quote_token=_leg(attributes.get("name"), 1),
                 reserve_usd=_decimal(attributes.get("reserve_in_usd")),
                 vol_24h=_decimal(volume.get("h24")),
                 buys_24h=buys,
@@ -212,13 +231,13 @@ def _related(relationships: Mapping[str, Any], key: str) -> str | None:
     return str(value) if value else None
 
 
-def _quote_symbol(name: Any) -> str | None:
-    """The quote leg of a ``"AAPLX / USDC"`` pool name.
+def _leg(name: Any, index: int) -> str | None:
+    """One side of a ``"AAPLX / USDC"`` pool name.
 
-    Only used to decide whether the quote is a canonical stablecoin. A pool priced in
-    something exotic reports USD figures that lean on a second, weaker feed, and the
-    quality screen has to be able to see that.
+    The base leg identifies the pool; the quote leg decides whether the price is
+    canonical. A pool priced in something exotic reports USD figures that lean on a
+    second, weaker feed, and the quality screen has to be able to see that.
     """
     if not isinstance(name, str) or "/" not in name:
         return None
-    return name.split("/", 1)[1].strip() or None
+    return name.split("/", 1)[index].strip() or None

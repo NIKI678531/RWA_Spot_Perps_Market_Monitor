@@ -10,18 +10,20 @@
     "dev": "webpack serve --mode=development --port 3025",
     "start": "webpack serve --mode=development --port 3025",
     "lint": "eslint src --ext .ts,.tsx",
+    "typecheck": "tsc --noEmit",
     "format": "prettier --write src"
   },
   "dependencies": {
     "antd": "5.24.3",
     "date-fns": "^4.1.0",
     "dayjs": "1.11.13",
+    "echarts": "^5.6.0",
+    "echarts-for-react": "^3.0.2",
     "framer-motion": "^11.18.2",
     "lucide-react": "^0.469.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "6.30.0",
-    "recharts": "^2.15.0"
+    "react-router-dom": "6.30.0"
   },
   "overrides": {
     "flatted": ">=3.4.2",
@@ -30,8 +32,8 @@
     "picomatch": ">=4.0.4"
   },
   "devDependencies": {
-    "@types/react": "^19.2.14",
-    "@types/react-dom": "^19.2.3",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
     "@typescript-eslint/eslint-plugin": "^8.57.0",
     "@typescript-eslint/parser": "^8.57.0",
     "autoprefixer": "^10.4.24",
@@ -40,6 +42,7 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^4.6.2",
     "html-webpack-plugin": "^5.6.6",
     "less": "^4.5.1",
     "less-loader": "^12.3.1",

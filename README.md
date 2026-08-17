@@ -23,21 +23,28 @@
 | [`DESIGN.md`](./DESIGN.md) | UI 设计系统（CSOP 玻璃拟态金融 UI 规范） |
 | [`CLAUDE.md`](./CLAUDE.md) | Claude Code 工作指引 + 业务硬约束 |
 | [`AGENTS.md`](./AGENTS.md) | Agent 协作约定 |
+| [`CONTEXT.md`](./CONTEXT.md) | 领域术语表（口径、层级、告警状态的唯一定义） |
+| [`docs/UI-LAYOUT.md`](./docs/UI-LAYOUT.md) | 页面模板、四态规范、信息层级 |
+| [`docs/DATAVIZ.md`](./docs/DATAVIZ.md) | 图表规范（禁用饼图 / 双轴 / 未验证占位） |
+| [`docs/DETECTORS.md`](./docs/DETECTORS.md) | 17 个检测器的口径与阈值 |
 
 ## 技术栈
 
 - **后端** Python 3.12+ · FastAPI · SQLAlchemy 2.0 · Alembic · `uv`
-- **前端** React 18 · TypeScript · Webpack · antd 5 · framer-motion
+- **前端** React 18 · TypeScript · Webpack 5 · antd 5 · ECharts · react-router 6 · lucide-react
 - **数据库** MySQL 8.4（compose）/ SQLite（本地兜底）
 - **调度** APScheduler · **报告** openpyxl + python-docx
 
 ## 快速开始
 
 ```bash
-# 后端
+# 后端（无 .env 时落回 sqlite:///./app.db）
+npm run backend:migrate    # alembic upgrade head
 npm run backend            # http://localhost:8025/api/docs
+npm run backend:test       # pytest
 
-# 前端
+# 前端（首次需装依赖；dev server 把 /api 代理到 8025）
+cd frontend && npm install
 npm run frontend           # http://localhost:3025
 
 # 全栈
@@ -58,7 +65,10 @@ Binance（bStocks 现货 + TradFi 永续）· Alpaca（美股底层参考价）�
 
 ## 状态
 
-P0 架构设计完成。实现分四期推进，见 `ARCHITECTURE.md` §9。
+P0 已实现：全量建表与迁移、口径类型系统、六个采集器、归一化与质量筛选、
+横截面 + 时序检测器、xlsx / docx 报告、13 个 API 路由模块，
+以及前端 T1（概览）+ T2（现货规模 / 交易场所 / 永续 / 异常雷达 / 数据质量 / 报告）。
+后续分期见 `ARCHITECTURE.md` §14。
 
 ---
 Not investment advice. 数据为可观察市场快照，不代表法律意义上的发行在外资产或审计后储备。

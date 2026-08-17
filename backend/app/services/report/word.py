@@ -190,27 +190,31 @@ def _chapter_venues(document: Any, data: ReportDataset) -> None:
 def _chapter_perps(document: Any, data: ReportDataset) -> None:
     document.add_heading("四 · 永续市场", level=1)
 
-    if not data.perp_contracts:
+    # Scoped, not raw: the collectors enumerate whole exchanges, so an ungated total
+    # here would be Hyperliquid's BTC book presented to management as RWA demand.
+    contracts = data.scoped_perp_contracts
+    if not contracts:
         document.add_paragraph(f"本时点无永续合约观测（{_NOT_VERIFIED}）。")
         return
 
     volumes = group_sum(
-        data.perp_contracts,
+        contracts,
         lambda r: r.snapshot.contract_id,
         lambda r: r.snapshot.vol_24h,
         MetricScope.PERP_VOLUME,
     )
     observed = [v.amount for v in volumes.values() if v.amount is not None]
     total = sum(observed, start=Decimal(0))
-    hip3 = {r.snapshot.contract_id for r in data.perp_contracts if r.perp_dex}
+    hip3 = {r.snapshot.contract_id for r in contracts if r.perp_dex}
 
     document.add_paragraph(
-        f"共观测到 {len(volumes)} 个合约，24 小时成交合计 {_usd(total)}，"
+        f"共观测到 {len(volumes)} 个映射到真实标的的合约，24 小时成交合计 {_usd(total)}，"
         f"其中 {len(hip3)} 个部署在 HIP-3 独立永续 DEX 上。"
-        "聚合站只列 Top 25，看不到无许可部署，因此本表直接向交易所枚举。"
+        "聚合站只列 Top 25，看不到无许可部署，因此本表直接向交易所枚举；"
+        "交易所自有的加密原生合约不计入本节。"
     )
 
-    by_id = {r.snapshot.contract_id: r for r in data.perp_contracts}
+    by_id = {r.snapshot.contract_id: r for r in contracts}
     table = _table(document, ["排名", "合约", "perp_dex", "成交", "占比"])
     for rank, key in enumerate(
         sort_by_amount(list(volumes), volumes)[:_TOP_N], start=1

@@ -50,7 +50,6 @@ services:
       dockerfile: ./frontend/Dockerfile
       args:
         FRONTEND_BASE_PATH: /
-        FRONTEND_API_BASE_URL: ""
     depends_on:
       backend:
         condition: service_started

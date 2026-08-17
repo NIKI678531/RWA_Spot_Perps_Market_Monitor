@@ -85,11 +85,36 @@ class PoolRow:
     pool: DimPool
     base_asset: DimAsset | None
 
+    @property
+    def in_scope(self) -> bool:
+        """Whether this pool may enter a ranking, rollup or alert.
+
+        A pool with no mapped base asset is not implicitly in scope. GeckoTerminal
+        search returns whatever matched the query string, so an unmapped pool is an
+        unidentified one, and counting it as tokenized-asset liquidity would inflate
+        the DEX total with pairs nobody has confirmed are RWA.
+        """
+        return (
+            self.base_asset is not None and self.base_asset.rwa_tier in IN_SCOPE_TIERS
+        )
+
 
 @dataclass(frozen=True, slots=True)
 class PerpRow:
     snapshot: FactPerpContractSnapshot
     contract: DimPerpContract | None
+
+    @property
+    def in_scope(self) -> bool:
+        """Whether this contract may enter a ranking, rollup or alert.
+
+        Scope is carried by the mapped underlying, not by a tier column: a perpetual
+        has no ``rwa_tier`` of its own, and the collectors deliberately ingest whole
+        exchanges (Hyperliquid's BTC book arrives alongside its HIP-3 equity DEXs).
+        Resolving to a ``dim_underlying`` row *is* the RWA test — crypto-native
+        symbols never resolve, so they never reach a rollup.
+        """
+        return self.contract is not None and self.contract.underlying_id is not None
 
     @property
     def symbol(self) -> str:
@@ -136,6 +161,21 @@ class ReportDataset:
     @property
     def scoped_pairs(self) -> tuple[PairRow, ...]:
         return tuple(p for p in self.pairs if p.in_scope)
+
+    @property
+    def scoped_pools(self) -> tuple[PoolRow, ...]:
+        """Pools whose base asset is an in-scope tokenized asset."""
+        return tuple(p for p in self.pools if p.in_scope)
+
+    @property
+    def scoped_perp_contracts(self) -> tuple[PerpRow, ...]:
+        """Contracts that resolve to a real-world underlying.
+
+        The unscoped ``perp_contracts`` still exists for coverage reporting — knowing
+        how much of an exchange we read is a data-quality fact — but no headline,
+        ranking or alert reads it.
+        """
+        return tuple(p for p in self.perp_contracts if p.in_scope)
 
 
 def latest_ts(
@@ -408,13 +448,13 @@ class UnderlyingAggregates:
             MetricScope.SPOT_VOLUME,
         )
         self.perp_volume = group_sum(
-            data.perp_contracts,
+            data.scoped_perp_contracts,
             lambda r: r.contract.underlying_id if r.contract else None,
             lambda r: r.snapshot.vol_24h,
             MetricScope.PERP_VOLUME,
         )
         self.perp_oi = group_sum(
-            data.perp_contracts,
+            data.scoped_perp_contracts,
             lambda r: r.contract.underlying_id if r.contract else None,
             lambda r: r.snapshot.oi_usd,
             MetricScope.PERP_OI,

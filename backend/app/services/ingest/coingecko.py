@@ -60,6 +60,20 @@ def _decimal(value: Any) -> Decimal | None:
         return None
 
 
+def _nested(payload: Mapping[str, Any], outer: str, inner: str) -> Any:
+    """Read ``payload[outer][inner]`` tolerating an explicit JSON ``null``.
+
+    ``dict.get(key, {})`` returns ``None`` — not the default — when the key is present
+    and null, and CoinGecko does send ``"converted_volume": null`` for tickers it could
+    not price. Chaining ``.get`` off that raises, and one such ticker would cost the
+    whole collection pass.
+    """
+    section = payload.get(outer)
+    if not isinstance(section, Mapping):
+        return None
+    return section.get(inner)
+
+
 @dataclass
 class CoinGeckoCollector(Collector):
     """Fetches assets, categories and tickers. Stores raw; normalizes nothing."""
@@ -87,12 +101,20 @@ class CoinGeckoCollector(Collector):
         market_session = classify_session(snapshot_ts)
         results: list[FetchResult] = []
         per_category: dict[str, list[CoinObservation]] = {}
-        seen_assets: set[str] = set()
         # Dimension rows must exist before the facts that reference them; the cache
         # also classifies tier and underlying once per new symbol rather than per row.
         cache = DimensionCache.load(session)
 
         with self._fetcher() as fetcher:
+            # Every category is fetched before any asset is written. The issuer a coin
+            # belongs to is only knowable once all five have been read: xStocks tokens
+            # also appear under "tokenized-stock", which names no issuer, and writing
+            # them as they arrive would stamp the first category that mentioned them.
+            # Issuer is what ``classify_tier`` reads to decide CORE_RWA, so getting it
+            # from iteration order would silently demote every custodied wrapper.
+            coins_by_id: dict[str, Mapping[str, Any]] = {}
+            issuer_of: dict[str, str] = {}
+
             for category in self.categories:
                 result = fetcher.get_json(
                     "/coins/markets",
@@ -129,20 +151,41 @@ class CoinGeckoCollector(Collector):
 
                 for coin in coins:
                     coin_id = str(coin.get("id"))
-                    if coin_id in seen_assets:
-                        continue
-                    seen_assets.add(coin_id)
-                    cache.ensure_asset(
-                        asset_id=coin_id,
-                        symbol=str(coin.get("symbol") or coin_id).upper(),
-                        name=coin.get("name"),
-                        coin_id=coin_id,
-                        issuer_id=issuer_id,
-                    )
-                    session.add(_asset_snapshot(coin, snapshot_ts, market_session))
-                # Dimension rows have to be on the database before the fact rows that
-                # reference them, or the insert fails on the foreign key.
-                session.flush()
+                    # First category wins the *metadata* (CATEGORIES is ordered by
+                    # completeness) but the first issuer-bearing category wins the
+                    # issuer, whichever order the two arrived in.
+                    coins_by_id.setdefault(coin_id, coin)
+                    if issuer_id:
+                        issuer_of.setdefault(coin_id, issuer_id)
+
+            # Ranked by market cap so ``ticker_depth`` cuts the tail, not an arbitrary
+            # slice: iterating a set would hand a different sample to every process.
+            ranked = sorted(
+                coins_by_id,
+                key=lambda cid: (
+                    _decimal(coins_by_id[cid].get("market_cap")) is None,
+                    -(_decimal(coins_by_id[cid].get("market_cap")) or Decimal(0)),
+                    cid,
+                ),
+            )
+
+            for coin_id in ranked:
+                entry = coins_by_id[coin_id]
+                source_symbol = str(entry.get("symbol") or coin_id)
+                cache.ensure_asset(
+                    asset_id=coin_id,
+                    # Display upper, resolve verbatim: xStocks writes AAPLx and the
+                    # suffix rules are case-sensitive on purpose.
+                    symbol=source_symbol.upper(),
+                    source_symbol=source_symbol,
+                    name=entry.get("name"),
+                    coin_id=coin_id,
+                    issuer_id=issuer_of.get(coin_id),
+                )
+                session.add(_asset_snapshot(entry, snapshot_ts, market_session))
+            # Dimension rows have to be on the database before the fact rows that
+            # reference them, or the insert fails on the foreign key.
+            session.flush()
 
             for row in build_rows(per_category):
                 session.add(
@@ -157,7 +200,7 @@ class CoinGeckoCollector(Collector):
                     )
                 )
 
-            for coin_id in list(seen_assets)[: self.ticker_depth]:
+            for coin_id in ranked[: self.ticker_depth]:
                 result = fetcher.get_json(f"/coins/{coin_id}/tickers")
                 results.append(result)
                 if not result.ok or not isinstance(result.payload, dict):
@@ -215,7 +258,7 @@ def _pair_snapshots(
         market = ticker.get("market") or {}
         venue_name = str(market.get("name") or market.get("identifier") or "unknown")
         venue_id = cache.ensure_venue(name=venue_name).venue_id
-        volume = _decimal(ticker.get("converted_volume", {}).get("usd"))
+        volume = _decimal(_nested(ticker, "converted_volume", "usd"))
         flagged_anomaly = bool(ticker.get(_ANOMALY_KEY))
         flagged_stale = bool(ticker.get(_STALE_KEY))
 
@@ -224,7 +267,7 @@ def _pair_snapshots(
             {
                 "raw": None,
                 "adjusted": None,
-                "price": _decimal(ticker.get("converted_last", {}).get("usd")),
+                "price": _decimal(_nested(ticker, "converted_last", "usd")),
                 "spread": _decimal(ticker.get("bid_ask_spread_percentage")),
                 "trust": ticker.get("trust_score"),
                 "anomaly": False,

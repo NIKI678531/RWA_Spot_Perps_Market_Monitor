@@ -24,6 +24,7 @@ from app.models.dimensions import (
     DimAsset,
     DimIssuer,
     DimPerpContract,
+    DimPool,
     DimUnderlying,
     DimVenue,
 )
@@ -33,6 +34,7 @@ from app.models.facts import (
     FactCategorySnapshot,
     FactPairSnapshot,
     FactPerpContractSnapshot,
+    FactPoolSnapshot,
 )
 from app.services.report import dataset, service, storage
 from app.services.report.excel import build_sheets
@@ -232,6 +234,79 @@ def test_every_sheet_survives_rendering(session: Session) -> None:
     workbook = load_workbook(BytesIO(render(build_sheets(dataset.load(session)))))
 
     assert len(workbook.sheetnames) == 22
+
+
+def test_unidentified_pools_and_crypto_perps_stay_out_of_the_totals(
+    session: Session,
+) -> None:
+    """Rule 11 on the two feeds that arrive unfiltered by design.
+
+    GeckoTerminal's pool search returns whatever matched the query string, and the
+    Hyperliquid collector enumerates every deployment's whole book — its own BTC
+    perpetual included. Both are correct at the ingest layer, which stores raw. Scope is
+    applied on the read path, and this is that gate: an unmapped pool and a
+    crypto-native contract dwarf the real numbers if either leaks into a total.
+    """
+    _seed(session)
+    session.add_all(
+        [
+            DimPool(
+                pool_id="solana_spyx",
+                network="solana",
+                dex="raydium",
+                base_asset_id="spyx",
+            ),
+            DimPool(
+                pool_id="solana_unknown",
+                network="solana",
+                dex="raydium",
+                base_asset_id=None,
+            ),
+            DimPerpContract(
+                contract_id="HL:rwa:BTC",
+                exchange="Hyperliquid",
+                perp_dex="rwa",
+                symbol="BTC",
+                underlying_id=None,
+            ),
+        ]
+    )
+    session.flush()
+    session.add_all(
+        [
+            FactPoolSnapshot(
+                pool_id="solana_spyx",
+                snapshot_ts=NOW,
+                market_session=MarketSession.CLOSED_WEEKEND,
+                reserve_usd=Decimal("1200000"),
+                vol_24h=Decimal("95000"),
+            ),
+            FactPoolSnapshot(
+                pool_id="solana_unknown",
+                snapshot_ts=NOW,
+                market_session=MarketSession.CLOSED_WEEKEND,
+                reserve_usd=Decimal("880000000"),
+                vol_24h=Decimal("74000000"),
+            ),
+            FactPerpContractSnapshot(
+                contract_id="HL:rwa:BTC",
+                snapshot_ts=NOW,
+                market_session=MarketSession.CLOSED_WEEKEND,
+                vol_24h=Decimal("9000000000"),
+                oi_usd=Decimal("5000000000"),
+            ),
+        ]
+    )
+    session.commit()
+
+    data = dataset.load(session)
+
+    assert [r.pool.pool_id for r in data.pools] == ["solana_spyx", "solana_unknown"]
+    assert [r.pool.pool_id for r in data.scoped_pools] == ["solana_spyx"]
+    assert len(data.perp_contracts) == 2
+    assert [
+        r.contract.contract_id for r in data.scoped_perp_contracts if r.contract
+    ] == ["HL:rwa:SPY"]
 
 
 def test_non_rwa_assets_stay_out_of_the_rankings(session: Session) -> None:

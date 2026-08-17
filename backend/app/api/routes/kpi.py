@@ -83,8 +83,14 @@ class _Headline:
 
 
 def _metrics(data: ReportDataset) -> dict[str, _Headline]:
+    # Every headline reads a *scoped* collection. The collectors deliberately ingest
+    # whole exchanges — Hyperliquid's BTC book arrives with its HIP-3 equity DEXs, and
+    # GeckoTerminal search returns whatever matched the string — so the tier gate is
+    # what separates "the tokenized RWA market" from "everything we happened to fetch".
     assets = data.scoped_assets
     pairs = data.scoped_pairs
+    pools = data.scoped_pools
+    perps = data.scoped_perp_contracts
     return {
         "spot_market_cap": _Headline(
             _sum(
@@ -113,31 +119,25 @@ def _metrics(data: ReportDataset) -> dict[str, _Headline]:
             _sum(
                 [
                     scoped(p.snapshot.reserve_usd, MetricScope.DEX_LIQUIDITY)
-                    for p in data.pools
+                    for p in pools
                 ],
                 MetricScope.DEX_LIQUIDITY,
             ),
-            len(data.pools),
+            len(pools),
         ),
         "perp_volume": _Headline(
             _sum(
-                [
-                    scoped(r.snapshot.vol_24h, MetricScope.PERP_VOLUME)
-                    for r in data.perp_contracts
-                ],
+                [scoped(r.snapshot.vol_24h, MetricScope.PERP_VOLUME) for r in perps],
                 MetricScope.PERP_VOLUME,
             ),
-            len(data.perp_contracts),
+            len(perps),
         ),
         "perp_oi": _Headline(
             _sum(
-                [
-                    scoped(r.snapshot.oi_usd, MetricScope.PERP_OI)
-                    for r in data.perp_contracts
-                ],
+                [scoped(r.snapshot.oi_usd, MetricScope.PERP_OI) for r in perps],
                 MetricScope.PERP_OI,
             ),
-            len(data.perp_contracts),
+            len(perps),
         ),
     }
 

@@ -1,0 +1,595 @@
+/*
+ * Application shell and shared surfaces.
+ *
+ * Structure follows UI-LAYOUT.md; every value is a token from tokens.css. The one
+ * rule worth restating: grouping is done with spacing, not borders (DESIGN.md
+ * principle 2), so a border here should be an exception you can justify.
+ */
+
+@import './tokens.css';
+@import './pages.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-body-md-size);
+  line-height: var(--text-body-line);
+  color: var(--color-text);
+  background-color: var(--color-background);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--dur-base) var(--ease-standard);
+}
+
+/* ===== 液态背景层 (z:0, pointer-events:none) + background-overlay ============ */
+
+.liquid-bg {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-bg);
+  pointer-events: none;
+  overflow: hidden;
+}
+
+.liquid-bg::before,
+.liquid-bg::after {
+  content: '';
+  position: absolute;
+  width: 46vw;
+  height: 46vw;
+  border-radius: var(--rounded-pill);
+  filter: blur(90px);
+  opacity: 0.5;
+}
+
+.liquid-bg::before {
+  top: -14vw;
+  right: -8vw;
+  background: radial-gradient(circle, var(--color-primary-container), transparent 68%);
+}
+
+.liquid-bg::after {
+  bottom: -18vw;
+  left: -10vw;
+  background: radial-gradient(circle, rgba(96, 165, 250, 0.28), transparent 68%);
+}
+
+.liquid-bg__overlay {
+  position: absolute;
+  inset: 0;
+  background: var(--color-background-overlay);
+}
+
+/* ===== shell ============================================================== */
+
+.shell {
+  position: relative;
+  z-index: var(--z-content);
+  display: flex;
+  min-height: 100%;
+}
+
+.shell__main {
+  flex: 1;
+  min-width: 0;
+  margin-left: var(--rail-width);
+  display: flex;
+  flex-direction: column;
+}
+
+.shell__content {
+  width: 100%;
+  max-width: var(--content-max-width);
+  margin: 0 auto;
+  padding: var(--spacing-page-y) var(--spacing-page-x);
+}
+
+/* ===== 左侧 rail 72px，hover 展开为 200px 浮层（不推挤内容） ================= */
+
+.rail {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  z-index: var(--z-dropdown);
+  width: var(--rail-width);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md) 0;
+  background: var(--color-surface);
+  backdrop-filter: blur(16px);
+  transition: width var(--dur-base) var(--ease-emphasized);
+  overflow: hidden;
+}
+
+.rail:hover,
+.rail:focus-within {
+  width: var(--rail-expanded-width);
+  box-shadow: var(--elevation-2);
+}
+
+.rail__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  height: var(--topbar-height);
+  padding-left: 24px;
+  color: var(--color-primary);
+  flex: 0 0 auto;
+}
+
+.rail__group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-top: var(--spacing-lg);
+}
+
+.rail__group-label {
+  padding-left: 24px;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  color: var(--color-text-disabled);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+.rail:hover .rail__group-label,
+.rail:focus-within .rail__group-label {
+  opacity: 1;
+}
+
+.rail__item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  height: 44px;
+  padding-left: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    color var(--dur-micro) var(--ease-standard),
+    transform var(--dur-micro) var(--ease-standard);
+}
+
+.rail__item:hover {
+  color: var(--color-primary);
+}
+
+.rail__item:active {
+  transform: scale(0.97);
+}
+
+.rail__item:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.rail__item[aria-disabled='true'] {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* 激活态用左侧 3px 渐变竖条，不用整块底色 */
+.rail__item--active {
+  color: var(--color-primary);
+}
+
+.rail__item--active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: var(--rounded-pill);
+  background: var(--gradient-primary);
+}
+
+.rail__label {
+  opacity: 0;
+  transition: opacity var(--dur-fast) var(--ease-standard);
+}
+
+.rail:hover .rail__label,
+.rail:focus-within .rail__label {
+  opacity: 1;
+}
+
+/* ===== 顶栏 =============================================================== */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: calc(var(--z-content) + 1);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  height: var(--topbar-height);
+  padding: 0 var(--spacing-page-x);
+  background: var(--color-background-overlay);
+  backdrop-filter: blur(12px);
+}
+
+.topbar__crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.topbar__crumbs strong {
+  color: var(--color-text);
+  font-weight: var(--text-label-weight);
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.topbar__stamp {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  font-family: var(--font-numeric);
+  font-size: var(--text-label-sm-size);
+  font-feature-settings: var(--text-numeric-feature);
+  color: var(--color-text-secondary);
+}
+
+.topbar__stamp--stale {
+  color: var(--color-warning);
+}
+
+.topbar__stamp--missing {
+  color: var(--color-error);
+}
+
+/* ===== surfaces =========================================================== */
+
+.card {
+  position: relative;
+  padding: 20px;
+  border-radius: var(--rounded-xl);
+  background: var(--color-surface);
+  backdrop-filter: blur(8px);
+  border: 1px solid transparent;
+  transition:
+    transform var(--dur-base) var(--ease-emphasized),
+    box-shadow var(--dur-base) var(--ease-emphasized),
+    border-color var(--dur-micro) var(--ease-standard);
+}
+
+.card--interactive:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--elevation-2);
+  border-color: var(--color-border);
+}
+
+.card--interactive:hover::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: var(--edge-highlight);
+  pointer-events: none;
+}
+
+.card--interactive:active {
+  transform: scale(0.97);
+}
+
+.card--interactive:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.card__title {
+  margin: 0 0 var(--spacing-sm);
+  font-size: var(--text-h3-size);
+  font-weight: var(--text-h3-weight);
+  line-height: var(--text-h3-line);
+}
+
+.card__hint {
+  margin: 0;
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.page-title {
+  margin: 0;
+  font-size: var(--text-h1-size);
+  font-weight: var(--text-h1-weight);
+  line-height: var(--text-h1-line);
+}
+
+.section-title {
+  margin: 0;
+  font-size: var(--text-h2-size);
+  font-weight: var(--text-h2-weight);
+  line-height: var(--text-h2-line);
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+/* 分组用间距不用分割线：组间 spacing.lg，组内 spacing.sm */
+.stack-lg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-lg);
+}
+
+.stack-md {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.stack-sm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.row-between {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+/* ===== numerals =========================================================== */
+
+.numeric {
+  font-family: var(--font-numeric);
+  font-size: var(--text-numeric-size);
+  font-weight: var(--text-numeric-weight);
+  line-height: var(--text-numeric-line);
+  font-feature-settings: var(--text-numeric-feature);
+}
+
+.numeric--positive {
+  color: var(--color-success);
+}
+
+.numeric--negative {
+  color: var(--color-error);
+}
+
+.numeric--neutral {
+  color: var(--color-text-secondary);
+}
+
+/*
+ * Not verified is a missing observation, never a zero. It renders as a hatched grey
+ * placeholder wherever a figure would go, so it is impossible to mistake for data.
+ */
+.not-verified {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px var(--spacing-sm);
+  border-radius: var(--rounded-pill);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-text-secondary);
+  background-image: repeating-linear-gradient(
+    45deg,
+    rgba(148, 163, 184, 0.28) 0,
+    rgba(148, 163, 184, 0.28) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.coverage-partial {
+  color: var(--color-warning);
+}
+
+/* ===== chips ============================================================== */
+
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--spacing-sm);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 8px 14px;
+  border: 0;
+  border-radius: var(--rounded-pill);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  font: inherit;
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-standard),
+    color var(--dur-micro) var(--ease-standard),
+    transform var(--dur-micro) var(--ease-standard);
+}
+
+.chip:hover {
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.chip:active {
+  transform: scale(0.97);
+}
+
+.chip:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.chip:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+.chip--active {
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+  box-shadow: inset 0 2px 0 0 var(--color-primary);
+}
+
+/* ===== skeletons: 骨架屏形状要暗示即将出现的版式，禁止 spinner ============== */
+
+.skeleton {
+  border-radius: var(--rounded-lg);
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.14) 25%,
+    rgba(148, 163, 184, 0.26) 37%,
+    rgba(148, 163, 184, 0.14) 63%
+  );
+  background-size: 400% 100%;
+  animation: shimmer 1.4s var(--ease-standard) infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0 50%;
+  }
+}
+
+/* ===== empty state ======================================================== */
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-xxl) var(--spacing-lg);
+  text-align: center;
+  color: var(--color-text-secondary);
+}
+
+/* ===== 瀑布 stagger 入场：60ms × i，上限 600ms ============================== */
+
+.stagger {
+  animation: rise var(--dur-base) var(--ease-emphasized) both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ===== antd overrides live in the theme object, never in !important CSS ==== */
+
+.ant-table-wrapper .ant-table {
+  background: transparent;
+}
+
+.ant-table-wrapper .ant-table-thead > tr > th {
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.ant-table-wrapper .ant-table-tbody > tr > td {
+  border-bottom: 0;
+}
+
+/* ===== 响应式 (UI-LAYOUT.md §5) =========================================== */
+
+@media (max-width: 1024px) {
+  .shell__content {
+    padding: var(--spacing-lg) var(--spacing-lg);
+  }
+
+  .topbar {
+    padding: 0 var(--spacing-lg);
+  }
+}
+
+@media (max-width: 768px) {
+  .rail {
+    width: 100%;
+    height: var(--topbar-height);
+    bottom: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: 0 var(--spacing-sm);
+    overflow-x: auto;
+  }
+
+  .rail:hover,
+  .rail:focus-within {
+    width: 100%;
+  }
+
+  .rail__brand,
+  .rail__group-label {
+    display: none;
+  }
+
+  .rail__group {
+    flex-direction: row;
+    padding-top: 0;
+  }
+
+  .rail__item {
+    padding: 0 var(--spacing-sm);
+  }
+
+  .rail__item--active::before {
+    top: auto;
+    bottom: 0;
+    left: 8px;
+    right: 8px;
+    width: auto;
+    height: 3px;
+  }
+
+  .shell__main {
+    margin-left: 0;
+    margin-top: var(--topbar-height);
+  }
+}

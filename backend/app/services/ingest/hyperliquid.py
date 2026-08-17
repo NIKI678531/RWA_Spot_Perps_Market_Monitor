@@ -123,6 +123,11 @@ class HyperliquidCollector(Collector):
                         vol_24h=_sum_or_none([c.vol_24h for c in contracts]),
                         open_interest_usd=_sum_or_none([c.oi_usd for c in contracts]),
                         symbol_count=len(contracts),
+                        # ``metaAndAssetCtxs`` returns open interest for every symbol in
+                        # the same response as the volume, so both totals cover the same
+                        # contracts. Said explicitly rather than left null, which reads
+                        # as unknown coverage.
+                        oi_symbol_count=len(contracts),
                     )
                 )
 

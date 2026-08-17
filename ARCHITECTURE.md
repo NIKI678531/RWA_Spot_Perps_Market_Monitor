@@ -367,7 +367,8 @@ APScheduler，时区 HKT。
 ```
 backend/app/
 ├── main.py                  create_app() 装配
-├── api/routes/              health kpi spot dex issuers perps themes alerts underlying reports quality
+├── api/routes/              health kpi scale spot dex issuers perps themes alerts
+│                            underlying timeseries reports quality
 ├── core/                    config.py  metrics.py  sessions.py
 ├── db/                      session.py  base.py
 ├── models/                  dim_* / fact_* / alert / registry

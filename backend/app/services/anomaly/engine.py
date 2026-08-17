@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -203,9 +204,12 @@ def _build_evidence(
         extra_json=json.dumps(
             {
                 **dict(evidence.extra),
+                # The sign is the whole message: "inf" is a dormant asset waking up,
+                # "-inf" is a live one going quiet. Recording both as "inf" would make
+                # the evidence row contradict the headline it is supposed to justify.
                 **(
-                    {"robust_z": "inf"}
-                    if robust_z is not None and robust_z == float("inf")
+                    {"robust_z": "inf" if robust_z > 0 else "-inf"}
+                    if robust_z is not None and math.isinf(robust_z)
                     else {}
                 ),
             },

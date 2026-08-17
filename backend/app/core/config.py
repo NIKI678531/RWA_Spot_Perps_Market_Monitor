@@ -69,6 +69,18 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.frontend_origins.split(",") if o.strip()]
 
     @property
+    def cors_allow_credentials(self) -> bool:
+        """Credentials are refused while the origin list is a wildcard.
+
+        ``*`` plus ``allow_credentials`` is the combination browsers reject outright
+        and servers should never offer: it invites any site to make authenticated
+        cross-origin calls. The default deployment is same-origin behind nginx and
+        needs no credentialed CORS at all, so the wildcard stays convenient for local
+        development without also being the setting that opens the API up.
+        """
+        return "*" not in self.cors_allow_origins
+
+    @property
     def normalized_api_base_path(self) -> str:
         """Router prefix. ``/`` means "no prefix", not a literal slash prefix."""
         base = self.api_base_path.strip()

@@ -122,8 +122,15 @@ class DimensionCache:
         chain: str | None = None,
         coin_id: str | None = None,
         issuer_id: str | None = None,
+        source_symbol: str | None = None,
     ) -> DimAsset:
-        """Return the asset row, creating and classifying it if it is new."""
+        """Return the asset row, creating and classifying it if it is new.
+
+        ``symbol`` is what gets displayed; ``source_symbol`` is what gets resolved,
+        defaulting to it. They differ when a collector normalises case for display —
+        the suffix rules are case-sensitive (``AAPLx`` is an xStocks wrapper, ``AAPLX``
+        is an unknown ticker ending in X), so resolution must see the original.
+        """
         existing = self._assets.get(asset_id)
         if existing is not None:
             # Fill blanks only. Tier and underlying are never rewritten here: a
@@ -134,7 +141,9 @@ class DimensionCache:
             existing.issuer_id = existing.issuer_id or issuer_id
             return existing
 
-        mapping = underlying_map.resolve(symbol, self.known_underlyings)
+        mapping = underlying_map.resolve(
+            source_symbol or symbol, self.known_underlyings
+        )
         if not mapping.resolved:
             self.unmapped.append(mapping)
         decision = classify_tier(

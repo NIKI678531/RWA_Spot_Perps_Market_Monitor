@@ -48,7 +48,15 @@ def detect(
 
     Uses adjusted rather than raw volume: a new listing whose entire volume carries a
     quality flag is a venue populating a book, not a market arriving.
+
+    An empty ``known_pairs`` means there is no prior snapshot, not that every pair is
+    new. Firing there would report the entire market as freshly listed on the first
+    collection — hundreds of alerts, all of them wrong, on the one day the feed makes
+    its first impression.
     """
+    if not known_pairs:
+        return []
+
     signals: list[Signal] = []
 
     for pair in observations:

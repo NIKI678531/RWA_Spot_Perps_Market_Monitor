@@ -140,17 +140,37 @@ class BinanceCollector(Collector):
             indexes = _by_symbol(premiums.payload, "indexPrice")
             fundings = _by_symbol(premiums.payload, "lastFundingRate")
 
+            # Volume, mark, index and funding arrive in two bulk calls, so every TradFi
+            # contract gets a row regardless of the cap. Only open interest costs a
+            # request per symbol, and only it is capped — truncating the universe here
+            # would drop contracts out of the venue total and out of every ranking
+            # while the row still looked like the whole book.
+            #
+            # Ranked by turnover so the cap takes the tail: the top contracts carry
+            # most of the volume (78.2% in the top ten on the baseline snapshot), and
+            # exchangeInfo order is arbitrary.
+            ranked = sorted(
+                tradfi.items(),
+                key=lambda item: (
+                    volumes.get(item[0]) is None,
+                    -(volumes.get(item[0]) or Decimal(0)),
+                    item[0],
+                ),
+            )
+
             states: list[PerpState] = []
-            for symbol, underlying_type in list(tradfi.items())[: self.oi_depth]:
-                oi = fetcher.get_json(
-                    "/fapi/v1/openInterest", params={"symbol": symbol}
-                )
-                results.append(oi)
-                oi_units = (
-                    _decimal(oi.payload.get("openInterest"))
-                    if oi.ok and isinstance(oi.payload, dict)
-                    else None
-                )
+            for position, (symbol, underlying_type) in enumerate(ranked):
+                oi_units = None
+                if position < self.oi_depth:
+                    oi = fetcher.get_json(
+                        "/fapi/v1/openInterest", params={"symbol": symbol}
+                    )
+                    results.append(oi)
+                    oi_units = (
+                        _decimal(oi.payload.get("openInterest"))
+                        if oi.ok and isinstance(oi.payload, dict)
+                        else None
+                    )
                 states.append(
                     PerpState(
                         symbol=symbol,
@@ -199,6 +219,10 @@ class BinanceCollector(Collector):
                 vol_24h=_sum_or_none([s.vol_24h for s in states]),
                 open_interest_usd=_sum_or_none([s.oi_usd for s in states]),
                 symbol_count=len(states),
+                # The two totals do not cover the same contracts, and the row says so.
+                # A capped open-interest sum is a floor on the venue's book, not the
+                # venue's book.
+                oi_symbol_count=min(len(states), self.oi_depth),
             )
         )
         return results

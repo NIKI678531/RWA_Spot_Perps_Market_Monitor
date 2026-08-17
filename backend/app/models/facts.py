@@ -148,6 +148,12 @@ class FactPerpVenueSnapshot(Base, _SnapshotMixin):
     vol_24h: Mapped[Decimal | None] = money_column()
     open_interest_usd: Mapped[Decimal | None] = money_column()
     symbol_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: How many of those symbols the open-interest figure actually covers. Volume
+    #: arrives in one bulk call while open interest is one request per symbol, so the
+    #: two columns of a single row can have different coverage. Equal to
+    #: ``symbol_count`` means complete; smaller means the total is a floor, and null
+    #: means the collector did not say.
+    oi_symbol_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class FactPerpContractSnapshot(Base, _SnapshotMixin):
