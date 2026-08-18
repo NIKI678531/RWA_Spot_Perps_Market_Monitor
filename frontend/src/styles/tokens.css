@@ -127,8 +127,8 @@
   --z-message: 3000;
 
   /* ===== layout constants (UI-LAYOUT.md §1) ===== */
-  --rail-width: 72px;
-  --rail-expanded-width: 200px;
+  /* The rail is always open at this width — it has no collapsed state. */
+  --rail-width: 200px;
   --topbar-height: 56px;
   --content-max-width: 1440px;
   --hero-input-max-width: 720px;

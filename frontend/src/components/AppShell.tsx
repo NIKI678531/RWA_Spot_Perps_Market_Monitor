@@ -1,5 +1,9 @@
 /**
- * The application shell: liquid background, 72px icon rail, top bar, content column.
+ * The application shell: liquid background, 200px nav rail, top bar, content column.
+ *
+ * The rail is pinned open. It costs 200px of width that wide tables would happily
+ * take, and it is worth it: a monitor is read by people who need to see where else
+ * they can look without moving the pointer to find out.
  *
  * The top bar carries the data timestamp permanently. Someone reading a monitor
  * needs to know how old the numbers are at all times — without it, every figure on

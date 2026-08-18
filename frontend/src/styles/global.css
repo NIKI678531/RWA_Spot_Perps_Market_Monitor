@@ -95,7 +95,7 @@ body {
   padding: var(--spacing-page-y) var(--spacing-page-x);
 }
 
-/* ===== 左侧 rail 72px，hover 展开为 200px 浮层（不推挤内容） ================= */
+/* ===== 左侧 rail 200px，常驻展开，推挤内容而非浮在其上 ====================== */
 
 .rail {
   position: fixed;
@@ -110,14 +110,7 @@ body {
   padding: var(--spacing-md) 0;
   background: var(--color-surface);
   backdrop-filter: blur(16px);
-  transition: width var(--dur-base) var(--ease-emphasized);
   overflow: hidden;
-}
-
-.rail:hover,
-.rail:focus-within {
-  width: var(--rail-expanded-width);
-  box-shadow: var(--elevation-2);
 }
 
 .rail__brand {
@@ -144,13 +137,6 @@ body {
   line-height: var(--text-label-line);
   color: var(--color-text-disabled);
   white-space: nowrap;
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-standard);
-}
-
-.rail:hover .rail__group-label,
-.rail:focus-within .rail__group-label {
-  opacity: 1;
 }
 
 .rail__item {
@@ -208,14 +194,9 @@ body {
   background: var(--gradient-primary);
 }
 
+/* 标签常驻。rail 不再折叠，没有需要淡入淡出的收起态。 */
 .rail__label {
-  opacity: 0;
-  transition: opacity var(--dur-fast) var(--ease-standard);
-}
-
-.rail:hover .rail__label,
-.rail:focus-within .rail__label {
-  opacity: 1;
+  white-space: nowrap;
 }
 
 /* ===== 顶栏 =============================================================== */
@@ -558,11 +539,6 @@ body {
     gap: var(--spacing-xs);
     padding: 0 var(--spacing-sm);
     overflow-x: auto;
-  }
-
-  .rail:hover,
-  .rail:focus-within {
-    width: 100%;
   }
 
   .rail__brand,
