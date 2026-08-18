@@ -9,12 +9,17 @@
  * It also catches the scope guards. They throw on purpose, and a thrown guard must
  * surface as a visible refusal — an unreadable chart is recoverable, a chart that
  * quietly dropped the rule is not.
+ *
+ * Mounting the chart is deferred until the frame is scrolled into view, so the
+ * entrance animation plays for a reader who is looking at it rather than for an
+ * offscreen box. The height is reserved either way, so nothing reflows.
  */
 
 import { useState, type ReactNode } from 'react';
 import { Table } from 'antd';
 import { AlertTriangle, TableIcon } from 'lucide-react';
 
+import { useInView } from '@/hooks/useInView';
 import { useI18n } from '@/i18n';
 
 export interface ChartTableColumn {
@@ -55,9 +60,14 @@ export function ChartFrame({
 }: ChartFrameProps) {
   const { t } = useI18n();
   const [showTable, setShowTable] = useState(false);
+  const [frameRef, inView] = useInView<HTMLElement>();
 
   return (
-    <section className="card stack-md" aria-label={ariaLabel}>
+    <section
+      className={`card stack-md chart-frame${inView ? ' chart-frame--in' : ''}`}
+      aria-label={ariaLabel}
+      ref={frameRef}
+    >
       <div className="row-between">
         <h2 className="section-title">{title}</h2>
         <button
@@ -108,7 +118,7 @@ export function ChartFrame({
           }))}
         />
       ) : (
-        <div style={{ height }}>{children}</div>
+        <div style={{ height }}>{inView ? children : null}</div>
       )}
 
       {footnote ? <p className="card__hint">{footnote}</p> : null}

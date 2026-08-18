@@ -18,6 +18,7 @@ import type { AlertRow, Kpi } from '@/api/types';
 import { BarRanking } from '@/charts/BarRanking';
 import { ChartFrame } from '@/charts/ChartFrame';
 import { AmountValue } from '@/components/AmountValue';
+import { BenchmarkStrip } from '@/components/BenchmarkStrip';
 import { KpiStrip } from '@/components/KpiStrip';
 import { AlertFeed } from '@/components/AlertFeed';
 import { ErrorState } from '@/components/states';
@@ -60,6 +61,7 @@ export function Overview() {
   const pairs = useApi((signal) => api.pairs({ limit: 10 }, signal), []);
   const venues = useApi((signal) => api.venues({ limit: 50 }, signal), []);
   const contracts = useApi((signal) => api.perpContracts({ limit: 50 }, signal), []);
+  const benchmark = useApi((signal) => api.benchmark({ limit: 12 }, signal), []);
 
   const metrics = kpi.data?.metrics;
   const notVerified = t('common.notVerified', '未验证');
@@ -201,11 +203,10 @@ export function Overview() {
                   type="button"
                   role="option"
                   aria-selected={position === highlight}
-                  className="hero__suggestion"
-                  style={
+                  className={
                     position === highlight
-                      ? { background: 'var(--color-primary-container)' }
-                      : undefined
+                      ? 'hero__suggestion hero__suggestion--active'
+                      : 'hero__suggestion'
                   }
                   onMouseEnter={() => setHighlight(position)}
                   onClick={() => go(entry)}
@@ -287,6 +288,14 @@ export function Overview() {
             onRetry={alerts.reload}
           />
         </div>
+
+        <BenchmarkStrip
+          rows={benchmark.data?.rows ?? []}
+          unavailableReason={benchmark.data?.unavailable_reason ?? null}
+          loading={benchmark.loading}
+          error={benchmark.error}
+          onRetry={benchmark.reload}
+        />
       </div>
     </div>
   );

@@ -155,7 +155,8 @@
 }
 
 .hero__suggestion:hover,
-.hero__suggestion:focus-visible {
+.hero__suggestion:focus-visible,
+.hero__suggestion--active {
   outline: none;
   background: var(--color-primary-container);
 }
@@ -214,11 +215,35 @@
 /*
  * Not a section divider: this dashed rule is the statement that the figures on
  * either side of it belong to different metric scopes and cannot be added.
+ *
+ * The rule on its own only says "different". Set sideways along it, the label says
+ * "not addable" — which is the one reading a viewer could otherwise get wrong, and
+ * the reason the gap is here at all. It stays inside the horizontally scrolling
+ * strip, so the statement travels with the figures it governs at every breakpoint.
  */
 .kpi-divider {
+  display: flex;
   flex: 0 0 auto;
+  flex-direction: column;
+  align-items: center;
+  align-self: stretch;
+  gap: var(--spacing-sm);
+}
+
+.kpi-divider__rule {
+  flex: 1;
   width: 0;
+  min-height: var(--spacing-sm);
   border-left: 1px dashed var(--color-border-strong);
+}
+
+.kpi-divider__note {
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  color: var(--color-text-disabled);
 }
 
 .kpi-card {
@@ -375,6 +400,28 @@
   flex-wrap: wrap;
 }
 
+/*
+ * Charts rise into place as they are scrolled to, rather than all at once on load.
+ * The frame owns the same visibility flag that defers mounting the chart, so the card
+ * and the bars inside it arrive together instead of the card sitting empty first.
+ *
+ * Qualified with `.card` on purpose: global.css imports this file first, so a bare
+ * `.chart-frame` would lose its `transition` to `.card`'s at equal specificity and the
+ * fade would snap. Two classes settle it without depending on file order.
+ */
+.card.chart-frame {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity var(--dur-base) var(--ease-emphasized),
+    transform var(--dur-base) var(--ease-emphasized);
+}
+
+.card.chart-frame--in {
+  opacity: 1;
+  transform: none;
+}
+
 .chart-skeleton {
   display: flex;
   flex-direction: column;
@@ -386,41 +433,38 @@
   height: 18px;
 }
 
-.tag-divergent {
+/*
+ * Tags carry their meaning in the outline and the text, not in a filled block.
+ *
+ * These sit inside table cells, beside the figure they qualify. A filled pill there
+ * reads as a second surface stacked on the row and competes with the number, which is
+ * what the cell is actually for — the same reason `.alert-item` marks severity with a
+ * 3px rule instead of tinting the whole card. The border carries the category colour
+ * at full strength, so nothing is lost by dropping the fill.
+ */
+.tag-divergent,
+.tag-union,
+.tag-overlap {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-xs);
   padding: 2px 8px;
+  border: 1px solid currentcolor;
   border-radius: var(--rounded-pill);
-  background: rgba(250, 173, 20, 0.24);
-  color: var(--color-cat-pcs);
+  background: transparent;
   font-size: var(--text-label-sm-size);
   font-weight: var(--text-label-weight);
+}
+
+.tag-divergent {
+  color: var(--color-cat-pcs);
 }
 
 .tag-union {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--rounded-pill);
-  background: rgba(35, 97, 173, 0.24);
   color: var(--color-cat-research);
-  font-size: var(--text-label-sm-size);
-  font-weight: var(--text-label-weight);
 }
 
 .tag-overlap {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
-  border-radius: var(--rounded-pill);
-  background: rgba(107, 114, 128, 0.18);
-  color: #374151;
-  font-size: var(--text-label-sm-size);
-  font-weight: var(--text-label-weight);
-}
-
-body.dark-mode .tag-overlap {
   color: var(--color-text-secondary);
 }
 
@@ -428,4 +472,28 @@ body.dark-mode .tag-overlap {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
   gap: var(--spacing-md);
+}
+
+/* ===== 代币价 vs 参考股价 ================================================== */
+
+/*
+ * A grid rather than a horizontal scroller: the basis cards are meant to be scanned
+ * against each other, and a row that runs off the edge hides the comparison that is
+ * the whole reason the block exists.
+ */
+.basis-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.basis-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.basis-card__value {
+  font-size: var(--text-h2-size);
+  font-weight: 600;
 }

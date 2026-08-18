@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, ForeignKey, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import (
@@ -174,6 +174,106 @@ class FactPerpContractSnapshot(Base, _SnapshotMixin):
     funding_rate: Mapped[Decimal | None] = ratio_column()
     mark_price: Mapped[Decimal | None] = money_column()
     index_price: Mapped[Decimal | None] = money_column()
+
+
+class FactIssuerSnapshot(Base, _SnapshotMixin):
+    """Issuer product breadth, taken from the issuer's own site.
+
+    Grain: issuer x snapshot_ts. ``dim_issuer.official_product_count`` holds only the
+    latest figure; this table holds the series, which is what makes "Ondo added 12
+    products this week" a question anyone can ask. Product launches are the leading
+    edge of the demand this system exists to detect, and a dimension column overwritten
+    in place cannot show them.
+    """
+
+    __tablename__ = "fact_issuer_snapshot"
+
+    issuer_id: Mapped[str] = mapped_column(
+        ForeignKey("dim_issuer.issuer_id"), primary_key=True
+    )
+    snapshot_ts: Mapped[datetime] = snapshot_pk_column()
+
+    #: What the issuer says it offers. The denominator of every coverage ratio.
+    official_product_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: How many venues, wallets and integrations the issuer names publicly. Not a
+    #: subset or superset of anything we observe trading — it is the issuer's claim.
+    listed_platform_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+
+class FactIssuerPlatformSnapshot(Base, _SnapshotMixin):
+    """One platform an issuer names as carrying its products.
+
+    Grain: issuer x platform x snapshot_ts. Append-only, so a platform appearing for
+    the first time is visible as a new row rather than inferred from a count that
+    went up.
+
+    ``platform_name`` is stored exactly as the issuer spells it and is deliberately
+    not classified into CEX / DEX / wallet: the source page mixes exchanges, chains,
+    brokers and analytics vendors without saying which is which, and assigning a type
+    we were not told is the kind of invented label domain rule 9 forbids.
+    """
+
+    __tablename__ = "fact_issuer_platform_snapshot"
+
+    issuer_id: Mapped[str] = mapped_column(
+        ForeignKey("dim_issuer.issuer_id"), primary_key=True
+    )
+    platform_name: Mapped[str] = mapped_column(String(96), primary_key=True)
+    snapshot_ts: Mapped[datetime] = snapshot_pk_column()
+
+
+class FactUnderlyingReference(Base, _SnapshotMixin):
+    """The real security's own price, from a TradFi feed. Grain: underlying x ts.
+
+    Every other fact table in this system measures the *wrapper*. This one measures
+    the thing being wrapped, which is what makes "the token traded 4% above the share"
+    a statement anyone can check. Without it, a tokenized price has nothing to be
+    right or wrong against.
+
+    **This table carries no ``MetricScope`` and is never summed.** A price is not one
+    of the five families, and adding prices across underlyings is meaningless in the
+    same way adding market caps to volumes is. Its use is per-underlying comparison —
+    ``RatioScope.BASIS`` — and display alongside, in the manner of ``dim_benchmark``.
+
+    ``price_ts`` matters more here than anywhere else. RWA tokens trade around the
+    clock and their underlyings do not, so outside RTH this row repeats a print that
+    is hours or days old. That is not staleness to be hidden: the token drifting away
+    from a frozen reference over a weekend is precisely the phenomenon worth watching.
+    But a basis computed without checking ``price_ts`` against ``snapshot_ts`` will
+    read a closed market as a mispricing.
+    """
+
+    __tablename__ = "fact_underlying_reference"
+
+    underlying_id: Mapped[str] = mapped_column(
+        ForeignKey("dim_underlying.underlying_id"), primary_key=True
+    )
+    snapshot_ts: Mapped[datetime] = snapshot_pk_column()
+
+    #: Last trade price on the feed named below.
+    price: Mapped[Decimal | None] = money_column()
+    #: When that trade happened *at the source*, not when we asked. See above.
+    price_ts: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    #: Previous session's close on the same feed. On a single-venue feed such as IEX
+    #: this is that venue's last print, not the official closing-auction price — the
+    #: auction happens at the listing exchange. Close enough to compare a day's move
+    #: against; not close enough to reconcile against a broker statement.
+    prev_close: Mapped[Decimal | None] = money_column()
+    #: Derived from the two columns above and stored for symmetry with
+    #: ``fact_asset_snapshot.change_24h``, which is the number it gets compared to.
+    change_24h: Mapped[Decimal | None] = ratio_column()
+    #: Deliberately not a money column: this is a count of *shares* on *one* venue,
+    #: not USD turnover and not a consolidated tape. It must never be placed next to
+    #: ``SPOT_VOLUME`` as though the two were the same measurement.
+    venue_vol_shares: Mapped[Decimal | None] = mapped_column(
+        Numeric(30, 8), nullable=True
+    )
+    #: Which feed produced the row (``iex``, ``sip``). Stored per row because the two
+    #: are different populations: IEX is a few per cent of consolidated volume, so a
+    #: series that silently switches feed changes meaning mid-chart.
+    feed: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
 
 class FactCategorySnapshot(Base, _SnapshotMixin):

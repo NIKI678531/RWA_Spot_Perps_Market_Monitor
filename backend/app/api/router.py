@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.routes import (
     alerts,
+    benchmark,
     dex,
     health,
     issuers,
@@ -32,6 +33,7 @@ api_router.include_router(dex.router)
 api_router.include_router(issuers.router)
 api_router.include_router(perps.router)
 api_router.include_router(themes.router)
+api_router.include_router(benchmark.router)
 api_router.include_router(alerts.router)
 api_router.include_router(underlying.router)
 api_router.include_router(timeseries.router)

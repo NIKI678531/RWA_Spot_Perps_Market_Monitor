@@ -256,6 +256,26 @@ export interface SourceHealth {
   sample_error: string | null;
 }
 
+export interface CatalogueCoverage {
+  /** Assets we index and can rank. In-scope tiers only. */
+  indexed_assets: number;
+  /** What the issuers publish, summed over those who publish a count at all. */
+  official_products: number | null;
+  /** `indexed_assets / official_products`. Null when unknown — never 1.0. */
+  ratio: number | null;
+  issuers_with_count: number;
+  issuer_count: number;
+}
+
+export interface ReferenceCoverage {
+  tracked_underlyings: number;
+  priced_underlyings: number;
+  feed: string | null;
+  /** Age of the *oldest* reference price. Large is normal outside RTH. */
+  max_age_minutes: number | null;
+  unavailable_reason: string | null;
+}
+
 export interface DataQuality {
   meta: Meta;
   sources: SourceHealth[];
@@ -264,6 +284,35 @@ export interface DataQuality {
   unverified_pairs: number;
   pending_mappings: number;
   divergent_venues: string[];
+  catalogue: CatalogueCoverage;
+  reference: ReferenceCoverage;
+}
+
+export interface BenchmarkRow {
+  underlying_id: string;
+  underlying_name: string;
+  asset_id: string;
+  symbol: string;
+  issuer_id: string | null;
+  token_price: string | null;
+  reference_price: string | null;
+  /** When the trade happened at the source — not when we read it. */
+  reference_price_ts: string | null;
+  /** Hours or days here is the normal state outside RTH, not a fault. */
+  reference_age_minutes: number | null;
+  feed: string | null;
+  /** `token_price / reference_price - 1`. Null when either side is missing. */
+  basis: number | null;
+  token_change_24h: string | null;
+  reference_change_24h: string | null;
+  market_session: MarketSession | null;
+}
+
+export interface BenchmarkList {
+  meta: Meta;
+  rows: BenchmarkRow[];
+  /** Set when no reference source has run. Shown instead of an empty table. */
+  unavailable_reason: string | null;
 }
 
 export interface ReportRow {

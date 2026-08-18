@@ -71,6 +71,19 @@ function hatchCanvas(color: string): HTMLCanvasElement | undefined {
 }
 
 /**
+ * DESIGN.md requires every motion to degrade under `prefers-reduced-motion`, and
+ * tokens.css does that for CSS by collapsing the `dur-*` values. ECharts animates in
+ * canvas and never reads a stylesheet, so charts stayed animated no matter the setting
+ * until this is checked explicitly.
+ */
+function prefersReducedMotion(): boolean {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+    return false;
+  }
+  return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
+/**
  * Everything shared by every chart: axis styling, tooltip surface, entrance motion.
  * Duration values come from the `dur-*` vocabulary; nothing invents its own.
  */
@@ -79,6 +92,7 @@ export function baseOption(): EChartsOption {
   const textSecondary = cssVar('--color-text-secondary', '#64748B');
   const border = cssVar('--color-border', 'rgba(100,116,139,0.35)');
   const surfaceStrong = cssVar('--color-surface-strong', '#FFFFFFEB');
+  const primaryContainer = cssVar('--color-primary-container', 'rgba(35,97,173,0.12)');
 
   return {
     color: categoricalPalette(),
@@ -86,11 +100,15 @@ export function baseOption(): EChartsOption {
       fontFamily: 'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
       color: text,
     },
+    animation: !prefersReducedMotion(),
     // dur-base + ease-emphasized, with a 60ms-per-series stagger capped at 600ms.
     animationDuration: 300,
     animationEasing: 'cubicOut',
     animationDelay: (index: number) => Math.min(index * 60, 600),
+    // A filter change is a transition of the same chart, not a new one, so the update
+    // eases over dur-base rather than snapping (DESIGN.md principle 5).
     animationDurationUpdate: 300,
+    animationEasingUpdate: 'cubicOut',
     grid: {
       left: 8,
       right: 16,
@@ -104,10 +122,20 @@ export function baseOption(): EChartsOption {
       borderWidth: 0,
       borderRadius: 16,
       padding: 8,
-      extraCssText:
-        'box-shadow: 0 12px 32px rgba(17,24,39,0.10); backdrop-filter: blur(16px);',
+      extraCssText: 'box-shadow: 0 12px 32px rgba(17,24,39,0.10);',
       textStyle: { color: text, fontSize: 13 },
       transitionDuration: 0.2,
+      // The band behind the hovered category reuses the same container colour that
+      // marks hover on chips and table rows, so "pointing at something" looks the same
+      // everywhere. ECharts' default is a grey that belongs to no palette.
+      //
+      // It is drawn on top of the bars, so the token has to stay an alpha — an opaque
+      // container colour here hides the bar the reader is hovering to read.
+      axisPointer: {
+        type: 'shadow',
+        shadowStyle: { color: primaryContainer },
+        lineStyle: { color: border, width: 1, type: [3, 3] },
+      },
     },
     legend: {
       // Series colours borrow the badge category tokens, which carry an unrelated

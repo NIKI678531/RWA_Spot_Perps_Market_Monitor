@@ -17,7 +17,7 @@ import { Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 
 import { api } from '@/api/client';
-import type { PerpContractRow, PerpDexRow } from '@/api/types';
+import type { PerpContractRow, PerpDexRow, PerpVenueRow } from '@/api/types';
 import { ChartFrame } from '@/charts/ChartFrame';
 import { DualScopeChart } from '@/charts/DualScopeChart';
 import { AmountValue } from '@/components/AmountValue';
@@ -33,6 +33,43 @@ function fundingText(rate: string | null): string {
   return `${(value * 100).toFixed(4)}%`;
 }
 
+/**
+ * One venue's totals, with its equity subset folded in rather than listed beside it.
+ *
+ * `/perps/venues` returns a `stock` row *inside* the venue's own total, the way the
+ * overlapping CoinGecko categories work: listing both as siblings would let a reader
+ * add a venue to itself. The subset therefore becomes a column on its parent and
+ * never a row of its own.
+ */
+interface VenueGroup {
+  key: string;
+  total: PerpVenueRow;
+  stock: PerpVenueRow | null;
+}
+
+const SEGMENT_SUBSET = 'stock';
+
+function groupVenues(rows: PerpVenueRow[]): VenueGroup[] {
+  const key = (row: PerpVenueRow) => `${row.exchange}::${row.perp_dex}`;
+  const groups: VenueGroup[] = [];
+  const byKey = new Map<string, VenueGroup>();
+
+  for (const row of rows) {
+    if (row.segment === SEGMENT_SUBSET) continue;
+    const group: VenueGroup = { key: key(row), total: row, stock: null };
+    groups.push(group);
+    byKey.set(group.key, group);
+  }
+  // Second pass: a subset row can only be attached once its parent exists, and the
+  // API's ordering is by volume, not by segment.
+  for (const row of rows) {
+    if (row.segment !== SEGMENT_SUBSET) continue;
+    const parent = byKey.get(key(row));
+    if (parent) parent.stock = row;
+  }
+  return groups;
+}
+
 export function Perps() {
   const { t } = useI18n();
   const [params, setParams] = useSearchParams();
@@ -41,6 +78,7 @@ export function Perps() {
 
   const contracts = useApi((signal) => api.perpContracts({ limit: 200 }, signal), []);
   const dexs = useApi((signal) => api.perpDexs(signal), []);
+  const perpVenues = useApi((signal) => api.perpVenues(signal), []);
 
   const rows = useMemo<PerpContractRow[]>(() => {
     const all = contracts.data?.rows ?? [];
@@ -54,6 +92,10 @@ export function Perps() {
 
   const top = rows.slice(0, 10);
   const dexRows: PerpDexRow[] = dexs.data?.rows ?? [];
+  const venueGroups = useMemo(
+    () => groupVenues(perpVenues.data?.rows ?? []),
+    [perpVenues.data],
+  );
 
   const columns: ColumnsType<PerpContractRow> = [
     {
@@ -109,6 +151,90 @@ export function Perps() {
       align: 'right',
       className: 'numeric',
       render: (value: string | null) => fundingText(value),
+    },
+  ];
+
+  const venueColumns: ColumnsType<VenueGroup> = [
+    {
+      title: t('perps.exchange', '交易所'),
+      key: 'exchange',
+      render: (_value, row) => (
+        <span>
+          {row.total.exchange}
+          {row.total.is_hip3 ? (
+            <>
+              {' '}
+              <span className="tag-union">{row.total.perp_dex}</span>
+            </>
+          ) : null}
+        </span>
+      ),
+    },
+    {
+      title: t('perps.symbols', '在册合约'),
+      key: 'symbols',
+      width: 130,
+      align: 'right',
+      className: 'numeric',
+      // The count of RWA contracts the venue lists, not of everything it lists: the
+      // collectors read whole exchanges and drop the crypto-native tail before this.
+      render: (_value, row) => formatCount(row.total.symbol_count),
+    },
+    {
+      title: t('perps.volume', '成交额 24h（流量）'),
+      key: 'vol',
+      align: 'right',
+      render: (_value, row) => <AmountValue amount={row.total.vol_24h} />,
+    },
+    {
+      title: t('perps.oi', '未平仓名义（存量）'),
+      key: 'oi',
+      align: 'right',
+      render: (_value, row) => {
+        const covered = row.total.oi_symbol_count;
+        const listed = row.total.symbol_count;
+        const isFloor = covered !== null && listed !== null && covered < listed;
+        const cell = <AmountValue amount={row.total.open_interest_usd} />;
+        if (!isFloor) return cell;
+        // A partial open-interest sum is a floor on the venue's book, not the book.
+        // Some venues charge one request per symbol for it, so the collector stops
+        // before the tail; saying so beats publishing a total that reads complete.
+        return (
+          <Tooltip
+            title={t(
+              'perps.oiFloorHint',
+              '未平仓只覆盖 {covered} / {listed} 个合约，因此这是下限而非全量。部分交易所的未平仓需要逐合约请求，采集在尾部停止。',
+            )
+              .replace('{covered}', String(covered))
+              .replace('{listed}', String(listed))}
+          >
+            <span>
+              {cell}
+              <span className="muted"> ≥</span>
+            </span>
+          </Tooltip>
+        );
+      },
+    },
+    {
+      title: (
+        <Tooltip
+          title={t(
+            'perps.stockSubsetHint',
+            '这一列是左侧成交额的一部分，不是另一笔。股票类合约包含在该场所的总额里，两者不可相加。',
+          )}
+        >
+          <span>{t('perps.stockSubset', '其中股票类')}</span>
+        </Tooltip>
+      ),
+      key: 'stock',
+      align: 'right',
+      render: (_value, row) =>
+        row.stock ? (
+          <AmountValue amount={row.stock.vol_24h} showScope={false} />
+        ) : (
+          <span className="muted">—</span>
+        ),
     },
   ];
 
@@ -229,6 +355,34 @@ export function Perps() {
           }}
         />
       </ChartFrame>
+
+      <section className="card stack-md">
+        <h2 className="section-title">{t('perps.venues', '跨场所永续排名')}</h2>
+        <p className="card__hint">
+          {t(
+            'perps.venuesNote',
+            '每个场所只统计能映射到真实世界标的的合约，加密原生合约不计入。「其中股票类」是同一场所成交额的子集，不是另一笔成交。',
+          )}
+        </p>
+        {perpVenues.loading ? (
+          <TableSkeleton rows={4} />
+        ) : perpVenues.error ? (
+          <ErrorState error={perpVenues.error} onRetry={perpVenues.reload} />
+        ) : venueGroups.length === 0 ? (
+          <EmptyState
+            title={t('common.empty', '暂无观测数据')}
+            hint={t('perps.venuesEmptyHint', '尚未采集到任何场所的永续汇总。')}
+          />
+        ) : (
+          <Table<VenueGroup>
+            rowKey="key"
+            size="middle"
+            pagination={false}
+            columns={venueColumns}
+            dataSource={venueGroups}
+          />
+        )}
+      </section>
 
       <section className="card stack-md">
         <h2 className="section-title">{t('perps.dexs', '永续 DEX')}</h2>

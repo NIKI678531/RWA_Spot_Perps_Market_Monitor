@@ -17,6 +17,7 @@ from app.api.deps import AsOf, DatasetDep, SessionDep
 from app.core.metrics import MetricScope, ScopedValue, safe_sum
 from app.schemas.common import Amount, Meta
 from app.schemas.market import ExecutiveKpi, Kpi
+from app.services.normalize.quality import Pool, screen_pools
 from app.services.report.dataset import ReportDataset, load, scoped
 
 router = APIRouter(tags=["kpi"])
@@ -91,6 +92,14 @@ def _metrics(data: ReportDataset) -> dict[str, _Headline]:
     pairs = data.scoped_pairs
     pools = data.scoped_pools
     perps = data.scoped_perp_contracts
+    _dex_liquidity = screen_pools(
+        Pool(
+            pool_id=p.pool.pool_id,
+            reserve_usd=p.snapshot.reserve_usd,
+            vol_24h=p.snapshot.vol_24h,
+        )
+        for p in pools
+    )
     return {
         "spot_market_cap": _Headline(
             _sum(
@@ -115,15 +124,15 @@ def _metrics(data: ReportDataset) -> dict[str, _Headline]:
             ),
             len(pairs),
         ),
+        # Screened, for the same reason ``spot_volume`` above reports adjusted rather
+        # than raw turnover: a source's own number can be implausible. GeckoTerminal
+        # reported five near-untraded Solana pools at a combined $426bn of reserves,
+        # which is larger than the tokenized market this page exists to measure. Raw
+        # and adjusted stay side by side on the data-quality page; the headline shows
+        # the figure that can be defended.
         "dex_liquidity": _Headline(
-            _sum(
-                [
-                    scoped(p.snapshot.reserve_usd, MetricScope.DEX_LIQUIDITY)
-                    for p in pools
-                ],
-                MetricScope.DEX_LIQUIDITY,
-            ),
-            len(pools),
+            _dex_liquidity.adjusted,
+            _dex_liquidity.total_pairs - _dex_liquidity.flagged_pairs,
         ),
         "perp_volume": _Headline(
             _sum(

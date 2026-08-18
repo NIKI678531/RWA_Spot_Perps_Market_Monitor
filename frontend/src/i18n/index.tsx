@@ -115,6 +115,7 @@ const en: Dictionary = {
   'dimension.flow': 'Flow',
   'dimension.ratio': 'Ratio',
   'kpi.notAdditive': 'These scopes cannot be added together',
+  'kpi.notAdditiveShort': 'Not additive',
   'common.time': 'Time',
   'common.filter': 'Filter',
   'common.clear': 'Clear',
@@ -213,6 +214,59 @@ const en: Dictionary = {
   'perps.chartNote':
     'Two scopes, two axes: volume is a 24-hour flow, open interest is a level at an ' +
     'instant. Where the two cross means nothing.',
+  'perps.venues': 'Cross-venue perpetual ranking',
+  'perps.venuesNote':
+    'Each venue counts only the contracts that resolve to a real-world underlying; ' +
+    'crypto-native books are excluded. "Of which equities" is a subset of the same ' +
+    "venue's volume, not a second amount.",
+  'perps.venuesEmptyHint': 'No venue rollup has been collected yet.',
+  'perps.symbols': 'RWA contracts',
+  'perps.stockSubset': 'Of which equities',
+  'perps.stockSubsetHint':
+    'Part of the volume to its left, not a second amount. Equity contracts are already ' +
+    'inside the venue total, so the two must not be added.',
+  'perps.oiFloorHint':
+    'Open interest covers {covered} of {listed} contracts, so this is a floor rather ' +
+    'than the whole book. Some venues charge one request per symbol for it and the ' +
+    'collector stops before the tail.',
+  'benchmark.title': 'Token price vs reference share price',
+  'benchmark.basis': 'Premium / discount',
+  'benchmark.hint':
+    'Basis = token price / reference share price − 1. It reads as a premium only where ' +
+    'one token is one share; a fractional wrapper shows a large steady figure that is a ' +
+    'unit artefact, not a mispricing.',
+  'benchmark.ageHint':
+    "The reference price carries the underlying's own trade time, not ours. While that " +
+    'market is shut it stays at the last close, which is normal rather than a failed ' +
+    'fetch.',
+  'benchmark.none': 'No reference share price to compare against.',
+  'benchmark.noneHint': 'Nothing in this snapshot has a comparable quote.',
+  'quality.coverage': 'Coverage',
+  'quality.coverageNote':
+    'The row above answers "how much did we collect"; this one answers "how much of the ' +
+    'market is that". The denominator is what the issuers publish, and an issuer that ' +
+    'publishes nothing is not counted as zero — that would flatter the ratio exactly ' +
+    'where coverage is worst.',
+  'quality.indexed': 'Indexed assets',
+  'quality.indexedNote': 'In-scope tiers only; NON_RWA is excluded',
+  'quality.catalogueRatio': 'Indexed / published',
+  'quality.catalogueRatioHint':
+    'Issuers publish far more products than any aggregator indexes: xStocks lists over ' +
+    '700 against roughly 113 in CoinGecko. Quoting the indexed count as the market size ' +
+    'understates it badly.',
+  'quality.officialProducts': 'published products',
+  'quality.issuersReporting': 'issuers publish a count',
+  'quality.referenced': 'Underlyings with a reference price',
+  'quality.referencedNote':
+    'Without a reference price a token can be measured for turnover but not for whether ' +
+    'its price is right',
+  'quality.referenceAge': 'Oldest reference price',
+  'quality.referenceAgeHint':
+    'The oldest row, not the average: coverage is only as fresh as its stalest quote, ' +
+    'and a mean hides a three-day-old price among current ones. A large figure while the ' +
+    'underlying market is shut is normal, not a failure.',
+  'quality.feed': 'Feed',
+  'quality.noFeed': 'No reference price source configured',
   'quality.subtitle':
     'A failed fetch is written as NOT_VERIFIED, never as 0. This page decides how the ' +
     'numbers elsewhere should be read.',
@@ -339,6 +393,7 @@ const ko: Dictionary = {
   'dimension.flow': '유량',
   'dimension.ratio': '비율',
   'kpi.notAdditive': '서로 다른 구경이라 합산할 수 없습니다',
+  'kpi.notAdditiveShort': '합산 불가',
   'common.time': '시각',
   'common.filter': '필터',
   'common.clear': '해제',
@@ -432,6 +487,53 @@ const ko: Dictionary = {
   'perps.chartNote':
     '구경이 둘이라 축도 둘입니다. 거래대금은 24시간 유량, 미결제약정은 특정 시점의 잔액이며 ' +
     '둘이 교차하는 지점에는 의미가 없습니다.',
+  'perps.venues': '거래소 간 무기한 순위',
+  'perps.venuesNote':
+    '각 거래소에서 실물 기초자산에 매핑되는 계약만 집계하며 암호자산 계약은 제외합니다. ' +
+    '“그중 주식류”는 같은 거래소 거래대금의 부분집합이며 별도의 금액이 아닙니다.',
+  'perps.venuesEmptyHint': '아직 거래소별 집계가 수집되지 않았습니다.',
+  'perps.symbols': 'RWA 계약 수',
+  'perps.stockSubset': '그중 주식류',
+  'perps.stockSubsetHint':
+    '왼쪽 거래대금의 일부이며 별도의 금액이 아닙니다. 주식류 계약은 이미 거래소 합계에 ' +
+    '포함되어 있어 두 값을 더하면 안 됩니다.',
+  'perps.oiFloorHint':
+    '미결제약정은 {listed}개 중 {covered}개 계약만 포함하므로 전체가 아니라 하한입니다. ' +
+    '일부 거래소는 계약마다 별도 호출이 필요해 수집이 뒤쪽에서 멈춥니다.',
+  'benchmark.title': '토큰 가격 대 기초주가',
+  'benchmark.basis': '프리미엄 / 디스카운트',
+  'benchmark.hint':
+    '괴리율 = 토큰 가격 / 기초주가 − 1. 토큰 1개가 주식 1주일 때만 프리미엄으로 읽을 수 ' +
+    '있습니다. 분할형 토큰은 큰 값이 일정하게 유지되는데, 이는 단위 차이일 뿐 오가격이 ' +
+    '아닙니다.',
+  'benchmark.ageHint':
+    '기초주가는 우리가 읽은 시각이 아니라 기초자산이 실제 체결된 시각을 담습니다. 해당 시장이 ' +
+    '휴장이면 직전 종가에 머무르며, 이는 수집 실패가 아니라 정상입니다.',
+  'benchmark.none': '대조할 기초주가가 없습니다.',
+  'benchmark.noneHint': '이번 스냅샷에는 비교 가능한 호가가 없습니다.',
+  'quality.coverage': '커버리지',
+  'quality.coverageNote':
+    '위 줄은 “얼마나 수집했는가”, 이 줄은 “그것이 시장의 얼마인가”에 답합니다. 분모는 발행사가 ' +
+    '직접 공개한 상품 수이며, 공개하지 않는 발행사를 0으로 세지 않습니다. 그렇게 하면 커버리지가 ' +
+    '가장 나쁠 때 비율이 가장 좋아 보입니다.',
+  'quality.indexed': '수록 자산',
+  'quality.indexedNote': '대상 등급만 포함하며 NON_RWA는 제외',
+  'quality.catalogueRatio': '수록 / 공식 공개',
+  'quality.catalogueRatioHint':
+    '발행사가 공개하는 상품 수는 어떤 애그리게이터의 수록 수보다 훨씬 많습니다. xStocks는 700종 ' +
+    '이상을 공시하지만 CoinGecko 수록은 약 113종입니다. 수록 수를 시장 규모로 인용하면 크게 ' +
+    '과소평가됩니다.',
+  'quality.officialProducts': '공식 상품 수',
+  'quality.issuersReporting': '개 발행사가 공개',
+  'quality.referenced': '기초주가가 있는 기초자산',
+  'quality.referencedNote':
+    '기초주가가 없으면 거래대금은 볼 수 있어도 가격이 맞는지는 판단할 수 없습니다',
+  'quality.referenceAge': '기초주가 최대 지연',
+  'quality.referenceAgeHint':
+    '평균이 아니라 가장 오래된 값입니다. 커버리지는 가장 오래된 호가만큼만 최신이며, 평균은 ' +
+    '사흘 전 가격을 최신 가격 사이에 숨깁니다. 기초 시장이 휴장일 때 값이 큰 것은 정상입니다.',
+  'quality.feed': '피드',
+  'quality.noFeed': '기초주가 수집원이 설정되지 않았습니다',
   'quality.subtitle':
     '수집 실패는 0이 아니라 NOT_VERIFIED로 기록합니다. 이 페이지는 다른 화면의 숫자를 어떻게 ' +
     '읽어야 하는지를 정합니다.',
@@ -556,6 +658,7 @@ const zhTW: Dictionary = {
   'dimension.flow': '流量',
   'dimension.ratio': '比率',
   'kpi.notAdditive': '不同口徑之間不可加總',
+  'kpi.notAdditiveShort': '不可加總',
   'common.time': '時間',
   'common.filter': '篩選',
   'common.clear': '清除',
@@ -641,6 +744,48 @@ const zhTW: Dictionary = {
     '左為映射到真實世界標的的合約數，成交與未平倉只統計這些；右為該部署上觀測到的全部合約數。',
   'perps.chartNote':
     '兩種口徑、兩條軸：成交是 24 小時流量，未平倉是某一瞬間的存量，兩條線交叉的位置沒有意義。',
+  'perps.venues': '跨場所永續排名',
+  'perps.venuesNote':
+    '每個場所只統計能映射到真實世界標的的合約，加密原生合約不計入。「其中股票類」是同一場所' +
+    '成交額的子集，不是另一筆成交。',
+  'perps.venuesEmptyHint': '尚未採集到任何場所的永續彙總。',
+  'perps.symbols': '在冊合約',
+  'perps.stockSubset': '其中股票類',
+  'perps.stockSubsetHint':
+    '這一欄是左側成交額的一部分，不是另一筆。股票類合約已包含在該場所的總額裡，兩者不可相加。',
+  'perps.oiFloorHint':
+    '未平倉只涵蓋 {covered} / {listed} 個合約，因此這是下限而非全量。部分交易所的未平倉需逐' +
+    '合約請求，採集在尾端停止。',
+  'benchmark.title': '代幣價 vs 參考股價',
+  'benchmark.basis': '溢價/折價',
+  'benchmark.hint':
+    '溢價 = 代幣價 / 參考股價 − 1。只有在 1 代幣 = 1 股時才能直接讀作溢價；按比例拆分的代幣' +
+    '會長期顯示一個固定的大數，那是單位差異，不是錯價。',
+  'benchmark.ageHint':
+    '參考價來自標的自身的成交時點，不是我們讀取的時點。標的休市時它會停在上一次收盤，這是正常' +
+    '狀態，不是採集失敗。',
+  'benchmark.none': '暫無可對照的參考股價。',
+  'benchmark.noneHint': '本次快照沒有可比對的標的。',
+  'quality.coverage': '覆蓋率',
+  'quality.coverageNote':
+    '上一排數字回答「採到了多少」，這一排回答「這佔市場的多少」。分母來自發行商自己公布的產品數，' +
+    '不公布的發行商不按 0 計入，否則覆蓋最差的時候比率反而最好看。',
+  'quality.indexed': '已收錄資產',
+  'quality.indexedNote': '僅在口徑內的層級，NON_RWA 不計入',
+  'quality.catalogueRatio': '收錄 / 官方公布',
+  'quality.catalogueRatioHint':
+    '發行商公布的產品數遠大於任何聚合器收錄的數量：xStocks 官方列出 700 餘檔，CoinGecko 只' +
+    '收錄約 113 檔。用收錄數當市場規模會嚴重低估。',
+  'quality.officialProducts': '官方產品數',
+  'quality.issuersReporting': '家發行商有公布',
+  'quality.referenced': '有參考股價的標的',
+  'quality.referencedNote': '沒有參考價的代幣無法判斷價格對不對，只能看成交',
+  'quality.referenceAge': '參考價最大延遲',
+  'quality.referenceAgeHint':
+    '取最舊的一筆參考價：覆蓋率只等於最陳舊的那一行，平均值會把三天前的報價藏在一堆當前報價裡。' +
+    '標的休市時數值大是正常的，不是採集失敗。',
+  'quality.feed': '資料源',
+  'quality.noFeed': '尚未設定參考價資料源',
   'quality.subtitle':
     '採集失敗寫成 NOT_VERIFIED，絕不寫成 0。這一頁決定其他頁面的數字該怎麼讀。',
   'quality.pairs': '已觀測交易對',

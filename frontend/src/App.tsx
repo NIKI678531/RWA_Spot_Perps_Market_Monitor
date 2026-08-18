@@ -24,7 +24,7 @@ import { Perps } from '@/pages/Perps';
 import { Reports } from '@/pages/Reports';
 import { SpotScale } from '@/pages/SpotScale';
 import { Venues } from '@/pages/Venues';
-import { readAntdTokens } from '@/styles/tokens';
+import { readAntdComponentTokens, readAntdTokens } from '@/styles/tokens';
 import '@/styles/global.css';
 
 const THEME_KEY = 'rwa-monitor.theme';
@@ -41,13 +41,18 @@ function Chrome() {
   const [dark, setDark] = useState(
     () => window.localStorage.getItem(THEME_KEY) === 'dark',
   );
-  const [tokens, setTokens] = useState(readAntdTokens);
+  // Seed tokens and component overrides both read CSS, so they are held together and
+  // refreshed in one pass — a split would let one of them lag a theme flip by a frame.
+  const [tokens, setTokens] = useState(() => ({
+    token: readAntdTokens(),
+    components: readAntdComponentTokens(),
+  }));
 
   useLayoutEffect(() => {
     document.body.classList.toggle('dark-mode', dark);
     window.localStorage.setItem(THEME_KEY, dark ? 'dark' : 'light');
     // Re-read after the class flip, before paint: antd gets the same palette CSS has.
-    setTokens(readAntdTokens());
+    setTokens({ token: readAntdTokens(), components: readAntdComponentTokens() });
   }, [dark]);
 
   const toggleTheme = useCallback(() => setDark((value) => !value), []);
@@ -55,12 +60,8 @@ function Chrome() {
   const themeConfig = useMemo(
     () => ({
       algorithm: dark ? antdTheme.darkAlgorithm : antdTheme.defaultAlgorithm,
-      token: tokens,
-      components: {
-        // antd's own table chrome would double the card's surface; the glass card
-        // underneath is the surface, so the table draws only rows and dividers.
-        Table: { headerBg: 'transparent', borderColor: tokens.colorBorder },
-      },
+      token: tokens.token,
+      components: tokens.components,
     }),
     [dark, tokens],
   );

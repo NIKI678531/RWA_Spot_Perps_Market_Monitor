@@ -40,6 +40,7 @@ from app.models.facts import (
     FactPerpContractSnapshot,
     FactPerpVenueSnapshot,
     FactPoolSnapshot,
+    FactUnderlyingReference,
 )
 from app.models.operations import FetchLog
 
@@ -148,6 +149,10 @@ class ReportDataset:
     venues: tuple[DimVenue, ...]
     pools: tuple[PoolRow, ...]
     perp_venues: tuple[FactPerpVenueSnapshot, ...]
+    #: TradFi prices for the underlyings, when a reference source is configured.
+    #: Empty is the normal state without one, and an empty benchmark column is
+    #: correct in that case — it is not a market in which nothing has a price.
+    references: tuple[FactUnderlyingReference, ...]
     perp_contracts: tuple[PerpRow, ...]
     alerts: tuple[Alert, ...]
     evidence: tuple[AlertEvidence, ...]
@@ -197,11 +202,20 @@ def load(session: Session, as_of: datetime | None = None) -> ReportDataset:
     category_ts = latest_ts(session, FactCategorySnapshot.snapshot_ts, as_of)
     pool_ts = latest_ts(session, FactPoolSnapshot.snapshot_ts, as_of)
     perp_venue_ts = latest_ts(session, FactPerpVenueSnapshot.snapshot_ts, as_of)
+    reference_ts = latest_ts(session, FactUnderlyingReference.snapshot_ts, as_of)
     perp_ts = latest_ts(session, FactPerpContractSnapshot.snapshot_ts, as_of)
 
     observed = [
         ts
-        for ts in (asset_ts, pair_ts, category_ts, pool_ts, perp_venue_ts, perp_ts)
+        for ts in (
+            asset_ts,
+            pair_ts,
+            category_ts,
+            pool_ts,
+            perp_venue_ts,
+            perp_ts,
+            reference_ts,
+        )
         if ts is not None
     ]
     # An empty warehouse still produces a workbook — 22 sheets of headers. That is a
@@ -226,6 +240,7 @@ def load(session: Session, as_of: datetime | None = None) -> ReportDataset:
         venues=_all(session, DimVenue, DimVenue.venue_id),
         pools=pools,
         perp_venues=_at(session, FactPerpVenueSnapshot, perp_venue_ts),
+        references=_at(session, FactUnderlyingReference, reference_ts),
         perp_contracts=perp_contracts,
         alerts=_load_alerts(session),
         evidence=_load_evidence(session),
@@ -389,6 +404,24 @@ def coverage(value: ScopedValue) -> Coverage:
     if value.amount is None:
         return "not_verified"
     return "complete" if value.verified else "partial"
+
+
+def age_minutes(observed_ts: datetime | None, as_of: datetime) -> int | None:
+    """How stale an observation is, in minutes, or ``None`` if it is undated.
+
+    Lives here because the reference price is the one figure in this system whose
+    age changes its meaning: the underlying market is shut for most of the hours we
+    collect, so a basis quoted without the gap reads every weekend as a mispricing.
+    The API and the workbook must therefore age it identically.
+
+    Compared naive on purpose. SQLite and MySQL both store ``DATETIME`` without an
+    offset, so one side of this subtraction comes back tz-aware and the other does
+    not; normalising here beats raising in the middle of a request.
+    """
+    if observed_ts is None:
+        return None
+    delta = as_of.replace(tzinfo=None) - observed_ts.replace(tzinfo=None)
+    return max(0, int(delta.total_seconds() // 60))
 
 
 def amount_of(values: dict[str, ScopedValue], key: str) -> Decimal | None:

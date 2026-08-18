@@ -16,11 +16,27 @@ from app.api.deps import DatasetDep, SessionDep
 from app.models.enums import MappingStatus
 from app.models.operations import UnderlyingMap
 from app.schemas.common import Meta
-from app.schemas.market import DataQuality, SourceHealth
+from app.schemas.market import (
+    CatalogueCoverage,
+    DataQuality,
+    ReferenceCoverage,
+    SourceHealth,
+)
+from app.services.ingest.alpaca import AlpacaCollector
 from app.services.normalize.quality import Pair, screen
-from app.services.report.dataset import ReportDataset
+from app.services.report.dataset import ReportDataset, age_minutes
 
 router = APIRouter(tags=["quality"])
+
+_NO_REFERENCE_SOURCE = (
+    "No TradFi reference source is configured, so no tokenized price has anything "
+    "to be checked against. Set ALPACA_API_KEY_ID and ALPACA_API_SECRET_KEY."
+)
+
+_REFERENCE_SILENT = (
+    "A reference source is configured but has written no prices at this snapshot. "
+    "Its last fetch outcome is in the source list above."
+)
 
 
 @router.get("/data-quality", response_model=DataQuality)
@@ -70,7 +86,9 @@ def data_quality(data: DatasetDep, session: SessionDep) -> DataQuality:
                 "as Not verified elsewhere rather than as 0, and pending_mappings "
                 "counts symbols nobody has confirmed — GOLD, GOLDJM and GLDMINE are "
                 "three different underlyings, so an unconfirmed guess is worse than a "
-                "gap."
+                "gap. catalogue.ratio is how much of the published market we index at "
+                "all; reference.priced_underlyings is how much of it can be checked "
+                "against a real share price."
             ),
             row_count=len(sources),
         ),
@@ -80,7 +98,67 @@ def data_quality(data: DatasetDep, session: SessionDep) -> DataQuality:
         unverified_pairs=unverified,
         pending_mappings=int(pending),
         divergent_venues=_divergent(data),
+        catalogue=_catalogue(data),
+        reference=_reference(data),
     )
+
+
+def _catalogue(data: ReportDataset) -> CatalogueCoverage:
+    """Indexed assets against what the issuers themselves publish.
+
+    The denominator is summed only over issuers who publish a count. Treating a
+    silent issuer as zero would inflate the ratio precisely when coverage is worst,
+    so ``issuers_with_count`` is returned beside it: a ratio built on two issuers of
+    nine is a different claim from a full one.
+    """
+    indexed = len(data.scoped_assets)
+    counts = [
+        i.official_product_count
+        for i in data.issuers
+        if i.official_product_count is not None
+    ]
+    official = sum(counts) if counts else None
+    return CatalogueCoverage(
+        indexed_assets=indexed,
+        official_products=official,
+        # Null, never 1.0. An unknown denominator makes the ratio unknown; defaulting
+        # it to one would read as "we see everything anyone issues".
+        ratio=(float(indexed / official) if official else None),
+        issuers_with_count=len(counts),
+        issuer_count=len(data.issuers),
+    )
+
+
+def _reference(data: ReportDataset) -> ReferenceCoverage:
+    """How many tracked underlyings have a real share price beside them."""
+    tracked = {a.asset.underlying_id for a in data.scoped_assets}
+    tracked |= {
+        p.contract.underlying_id for p in data.scoped_perp_contracts if p.contract
+    }
+    tracked.discard(None)
+
+    priced = [r for r in data.references if r.underlying_id in tracked]
+    ages = [
+        age
+        for age in (age_minutes(r.price_ts, data.as_of) for r in priced)
+        if age is not None
+    ]
+    return ReferenceCoverage(
+        tracked_underlyings=len(tracked),
+        priced_underlyings=len(priced),
+        feed=next((r.feed for r in priced if r.feed), None),
+        # The *oldest* price, not the average: coverage is only as fresh as its
+        # stalest row, and a mean would hide one three-day-old quote among fifty
+        # current ones.
+        max_age_minutes=max(ages) if ages else None,
+        unavailable_reason=None if priced else _no_reference_reason(),
+    )
+
+
+def _no_reference_reason() -> str:
+    if not AlpacaCollector.is_configured():
+        return _NO_REFERENCE_SOURCE
+    return _REFERENCE_SILENT
 
 
 def _divergent(data: ReportDataset) -> list[str]:

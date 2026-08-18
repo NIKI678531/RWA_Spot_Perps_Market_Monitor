@@ -61,7 +61,15 @@ export function KpiStrip({ metrics, loading }: { metrics: Kpi[]; loading: boolea
                 className="kpi-divider"
                 role="separator"
                 aria-label={t('kpi.notAdditive', '不同口径之间不可加总')}
-              />
+              >
+                <span className="kpi-divider__rule" />
+                {/* The separator's own label already carries this for screen
+                    readers; repeating it would read the rule out twice. */}
+                <span className="kpi-divider__note" aria-hidden>
+                  {t('kpi.notAdditiveShort', '不可加总')}
+                </span>
+                <span className="kpi-divider__rule" />
+              </div>
             ) : null}
             <div
               className="card kpi-card stagger"

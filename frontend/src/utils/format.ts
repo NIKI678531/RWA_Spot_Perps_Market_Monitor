@@ -90,6 +90,32 @@ export function formatAge(iso: string | null | undefined): string {
   return `${Math.floor(hours / 24)} 天前`;
 }
 
+/**
+ * A span already measured in minutes, spelled out.
+ *
+ * Separate from `formatAge`, which measures against the browser clock. A reference
+ * price is aged against the *snapshot*, not against now, so that reopening the tab
+ * tomorrow does not silently make every quote look a day staler than the figures it
+ * is being compared with.
+ */
+export function formatMinutes(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || !Number.isFinite(minutes)) {
+    return '—';
+  }
+  if (minutes < 1) return '刚刚';
+  if (minutes < 60) return `${Math.round(minutes)} 分钟`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} 小时`;
+  return `${Math.floor(hours / 24)} 天`;
+}
+
+/** A signed ratio as a percentage. `+2.67%`. Null stays a dash, never `0.00%`. */
+export function formatBasis(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return '—';
+  const sign = value > 0 ? '+' : '';
+  return `${sign}${(value * 100).toFixed(2)}%`;
+}
+
 export function formatBytes(bytes: number | null | undefined): string {
   if (bytes === null || bytes === undefined) return '—';
   if (bytes < 1024) return `${bytes} B`;

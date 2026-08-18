@@ -51,6 +51,18 @@ def _int(value: Any) -> int | None:
         return None
 
 
+#: GeckoTerminal documents 30 requests/minute for the keyless tier, and asking for
+#: exactly that is what a live pass measured as unusable: 11 calls succeeded and the
+#: next 29 came back 429. Pacing at the published ceiling leaves no headroom for the
+#: window's own jitter, and the CoinGecko collector runs from the same IP earlier in
+#: the same pass — the two are the same operator and plausibly share an allowance.
+#:
+#: Under-asking is close to free here. The cost is wall-clock inside a job that runs
+#: hourly and six-hourly, and 40 paced requests still finish in about three minutes.
+#: The cost of over-asking is a source that returns a quarter of its pools.
+RATE_LIMIT_PER_MINUTE = 12
+
+
 @dataclass(frozen=True, slots=True)
 class PoolState:
     """One pool as of this snapshot, before any dimension work."""
@@ -82,7 +94,7 @@ class GeckoTerminalCollector(Collector):
         return HttpFetcher(
             source_id=self.source_id,
             base_url=settings.geckoterminal_base_url,
-            rate_limit_per_minute=30,
+            rate_limit_per_minute=RATE_LIMIT_PER_MINUTE,
             headers={"Accept": "application/json;version=20230302"},
         )
 

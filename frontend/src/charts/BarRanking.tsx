@@ -66,7 +66,6 @@ export function BarRanking({
       tooltip: {
         ...(baseOption().tooltip as object),
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
         formatter: (params: unknown) => {
           const rows = Array.isArray(params) ? params : [params];
           const head = (rows[0] as { name?: string }).name ?? '';

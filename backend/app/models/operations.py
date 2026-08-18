@@ -23,6 +23,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
+from sqlalchemy.dialects import mysql
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.metrics import MetricScope
@@ -103,6 +104,17 @@ class FetchLog(Base):
     created_at: Mapped[datetime] = created_at_column()
 
 
+#: The two columns of ``uq_underlying_map_source``. MySQL 8.4 defaults utf8mb4 columns
+#: to a case-insensitive collation, under which ``AAPLx`` and ``AAPLX`` are one key —
+#: but the suffix rules in ``normalize.underlying_map`` are case-sensitive precisely
+#: because those are an xStocks wrapper and an unrecognised ticker respectively. Pinned
+#: to a binary collation there; SQLite already compares by bytes. See revision
+#: 7d5a1c2e9b04.
+_CASE_SENSITIVE_KEY = String(96).with_variant(
+    mysql.VARCHAR(96, collation="utf8mb4_bin"), "mysql"
+)
+
+
 class UnderlyingMap(Base):
     """A source symbol resolved (or not) to an underlying.
 
@@ -121,9 +133,13 @@ class UnderlyingMap(Base):
         primary_key=True,
         autoincrement=True,
     )
-    source_id: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    source_id: Mapped[str] = mapped_column(
+        _CASE_SENSITIVE_KEY, nullable=False, index=True
+    )
     #: The symbol exactly as the source spells it, e.g. ``AAPLX`` or ``SPYB``.
-    source_symbol: Mapped[str] = mapped_column(String(96), nullable=False, index=True)
+    source_symbol: Mapped[str] = mapped_column(
+        _CASE_SENSITIVE_KEY, nullable=False, index=True
+    )
     #: The symbol after suffix stripping, e.g. ``AAPL``. Kept separately so a bad
     #: stripping rule can be audited without re-fetching.
     normalized_symbol: Mapped[str | None] = mapped_column(String(96), nullable=True)

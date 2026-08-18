@@ -11,7 +11,13 @@
   /* ===== colors: 主色与中性 ===== */
   --color-primary: #2361ad;
   --color-primary-hover: #1a4e8a;
-  --color-primary-container: #e7eef8;
+  /*
+   * The container is primary tinted, and it is stated as an alpha rather than as the
+   * flat #e7eef8 it composites to. Every use of it is a fill laid over the glass —
+   * chip hover, selected row, chart axis pointer — so an opaque value covers the thing
+   * the reader was pointing at. The dark theme already states it this way.
+   */
+  --color-primary-container: #2361ad1f;
   --color-on-primary: #ffffff;
   --color-accent: #60a5fa;
 

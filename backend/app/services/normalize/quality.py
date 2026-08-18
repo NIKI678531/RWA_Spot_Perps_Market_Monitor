@@ -18,6 +18,21 @@ from typing import Iterable, Protocol
 
 from app.core.metrics import MetricScope, ScopedValue
 
+#: Reserve below which an implausible pool cannot distort anything worth reporting.
+#: Same reasoning as the alert floor: being wrong about a $500 pool is not a finding,
+#: and screening one costs more credibility than it saves.
+POOL_RESERVE_FLOOR_USD = Decimal("50000000")
+
+#: 24h turnover as a fraction of reserve, under which a large pool is not a market.
+#: A pool holding $50mn and trading $500 against it is not thinly traded, it is
+#: mispriced — reserve is denominated in a quote the source has valued wrongly.
+#:
+#: Measured, not chosen: at one snapshot exactly six pools cleared the floor above and
+#: every one of them turned over less than 0.0008% of reserve, while the other 454
+#: pools had a median of 0.0025% and an upper quartile above 10%. The gap between the
+#: two groups is four orders of magnitude wide, so the threshold sits in empty space.
+POOL_MIN_TURNOVER_RATIO = Decimal("0.00001")
+
 
 class QualityFlagged(Protocol):
     """Whatever a caller passes must at least declare these three things."""
@@ -76,6 +91,83 @@ class QualityScreen:
             # That is the widest divergence there is, not the absence of one.
             return True
         return adjusted_amount < raw_amount / 10
+
+
+@dataclass(frozen=True, slots=True)
+class Pool:
+    """A DEX pool for reserve screening.
+
+    Pools carry no upstream quality flag the way CoinGecko pairs do, so the judgement
+    has to be made here from the two numbers the source gives us.
+    """
+
+    pool_id: str
+    reserve_usd: Decimal | None
+    vol_24h: Decimal | None
+
+    @property
+    def is_flagged(self) -> bool:
+        """Whether this pool's reserve is too implausible to aggregate.
+
+        The observed failure: GeckoTerminal reported ``AAPLX / USDC`` on Solana at a
+        reserve of $192.8bn against $0 of 24h volume. Four more pools like it summed
+        to $426bn of "DEX liquidity" — more than the entire tokenized market — on the
+        executive KPI. The number is the source's own, not a parsing error, so it
+        cannot be fixed by reading more carefully.
+
+        Note this is ``AAPLX``, not the xStocks ``AAPLx``, whose real pools hold about
+        $140k. The case distinction that ``underlying_map`` is careful about is the
+        same distinction here: one is a wrapper, the other is a token that borrowed
+        the spelling.
+
+        Absence of trading is what makes it decidable. A reserve is a claim about how
+        much value is pooled; volume is a claim about how much of it moved. When the
+        first is enormous and the second is zero, the second is the credible one,
+        because trades are observed individually and reserves are inferred from a
+        quote token's price.
+        """
+        if self.reserve_usd is None or self.reserve_usd < POOL_RESERVE_FLOOR_USD:
+            return False
+        # Unobserved volume is not zero volume, so it cannot convict the pool.
+        if self.vol_24h is None:
+            return False
+        return self.vol_24h / self.reserve_usd < POOL_MIN_TURNOVER_RATIO
+
+
+def screen_pools(pools: Iterable[Pool]) -> QualityScreen:
+    """Split DEX reserves into raw and plausibility-adjusted totals.
+
+    Deliberately the same shape as ``screen``: both figures are reported and the gap
+    between them is the finding. Dropping the flagged pools outright would hide that
+    the source claims $426bn, and reporting only raw would put a number on the
+    dashboard that is wrong by four orders of magnitude.
+    """
+    pool_list = list(pools)
+    observed = [p for p in pool_list if p.reserve_usd is not None]
+    clean = [p for p in observed if not p.is_flagged]
+
+    def total(subset: list[Pool]) -> ScopedValue:
+        if not subset:
+            return ScopedValue(
+                amount=None, scope=MetricScope.DEX_LIQUIDITY, verified=False
+            )
+        amount = sum(
+            (p.reserve_usd for p in subset if p.reserve_usd is not None),
+            start=Decimal(0),
+        )
+        return ScopedValue(
+            amount=amount,
+            scope=MetricScope.DEX_LIQUIDITY,
+            verified=len(observed) == len(pool_list),
+        )
+
+    return QualityScreen(
+        raw=total(observed),
+        adjusted=total(clean),
+        total_pairs=len(pool_list),
+        flagged_pairs=sum(1 for p in observed if p.is_flagged),
+        unverified_pairs=len(pool_list) - len(observed),
+    )
 
 
 def screen(

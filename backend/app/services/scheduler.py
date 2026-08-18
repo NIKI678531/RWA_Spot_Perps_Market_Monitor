@@ -4,7 +4,8 @@ Cadences follow ARCHITECTURE.md §12, in Hong Kong time:
 
 ===============  ==============================================================
 every 15 min     headline snapshot (Binance TradFi ticker, Hyperliquid ctxs)
-every 1 hour     spot Top 50 + GeckoTerminal pools + Hyperliquid perp DEXs
+every 1 hour     spot Top 50 + GeckoTerminal pools + Hyperliquid perp DEXs +
+                 TradFi reference prices (only when Alpaca is configured)
 every 6 hours    long-tail spot, category totals, issuer product counts
 daily 03:00      baseline recompute
 daily 08:00      generate xlsx + docx
@@ -30,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Sequence
 
+from apscheduler.executors.pool import ThreadPoolExecutor
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -42,15 +44,18 @@ from app.core.sessions import MarketSession
 from app.db.session import SessionLocal
 from app.models.enums import EntityType, FetchStatus
 from app.models.facts import FactAssetSnapshot, FactPerpContractSnapshot
-from app.models.operations import BaselineSnapshot
+from app.models.operations import BaselineSnapshot, FetchLog
 from app.services.analytics.baseline import compute_baseline
 from app.services.anomaly.engine import build_default_engine
 from app.services.ingest import registry
 from app.services.ingest.base import Collector, FetchResult, record_fetches
+from app.services.ingest.alpaca import build_collectors as build_reference_collectors
 from app.services.ingest.binance import BinanceCollector
+from app.services.ingest.cex_perps import build_collectors as build_cex_perp_collectors
 from app.services.ingest.coingecko import CoinGeckoCollector
 from app.services.ingest.geckoterminal import GeckoTerminalCollector
 from app.services.ingest.hyperliquid import HyperliquidCollector
+from app.services.ingest.issuer_official import IssuerOfficialCollector
 from app.services.normalize import seed as reference_seed
 from app.services.report import service as report_service
 
@@ -163,19 +168,37 @@ def bootstrap() -> None:
 
 
 def headline_snapshot() -> PassResult:
-    """Every 15 minutes: the two fastest-moving perpetual sources, then detection."""
+    """Every 15 minutes: every perpetual venue, then detection.
+
+    All seven perp sources run in one pass on purpose. The cross-sectional detectors
+    compare a contract against its peers *at the same instant*, so a venue collected
+    on a different cadence cannot take part in that comparison — and a peer group of
+    one venue is not a peer group.
+    """
     return run_pass(
-        [HyperliquidCollector(), BinanceCollector()], detect=True, label="headline"
+        [HyperliquidCollector(), BinanceCollector(), *build_cex_perp_collectors()],
+        detect=True,
+        label="headline",
     )
 
 
 def hourly_snapshot() -> PassResult:
-    """Hourly: spot Top 50, DEX pools, and the perp DEX roster."""
+    """Hourly: spot Top 50, DEX pools, the perp DEX roster, TradFi reference prices.
+
+    Reference prices sit here rather than on a daily post-close job because the basis
+    they support — token price against share price — is only meaningful when both
+    sides come from the same instant, and the token side is collected on this cadence.
+    Outside RTH the reference simply repeats, which is the honest reading: the share
+    stopped moving and the token did not.
+
+    The reference list is empty unless Alpaca is configured; see ``alpaca``.
+    """
     return run_pass(
         [
             CoinGeckoCollector(ticker_depth=50),
             GeckoTerminalCollector(symbol_depth=40),
             HyperliquidCollector(),
+            *build_reference_collectors(),
         ],
         detect=True,
         label="hourly",
@@ -193,6 +216,10 @@ def long_tail_snapshot() -> PassResult:
         [
             CoinGeckoCollector(ticker_depth=150),
             GeckoTerminalCollector(symbol_depth=120),
+            # Issuer catalogues change on the scale of days, so six-hourly is already
+            # generous; the pages are also several megabytes each, which is reason
+            # enough to keep them off the 15-minute cadence.
+            IssuerOfficialCollector(),
         ],
         detect=False,
         label="long_tail",
@@ -232,7 +259,15 @@ def run_pass(
     fetches = 0
 
     with SessionLocal() as session:
+        observed = _sources_already_observed(session, snapshot_ts)
         for collector in collectors:
+            if collector.source_id in observed:
+                logger.info(
+                    "skipping %s: already observed at %s",
+                    collector.source_id,
+                    snapshot_ts.isoformat(),
+                )
+                continue
             try:
                 results = collector.collect(session, snapshot_ts)
                 # Inside the try with the collect itself: a constraint violation on
@@ -251,6 +286,8 @@ def run_pass(
 
             fetches += len(results)
             failures += sum(1 for r in results if not r.ok)
+            if any(r.ok for r in results):
+                observed.add(collector.source_id)
 
         result = PassResult(snapshot_ts=snapshot_ts, fetches=fetches, failures=failures)
         if detect:
@@ -265,6 +302,40 @@ def run_pass(
         result.alerts_created,
     )
     return result
+
+
+def _sources_already_observed(session: Session, snapshot_ts: datetime) -> set[str]:
+    """Sources that already returned something at exactly ``snapshot_ts``.
+
+    Two passes can land on one instant. ``now_utc()`` truncates to the minute and the
+    15-minute interval trigger drifts with process start, so it coincides with the
+    hourly cron roughly four times a day — and ``HyperliquidCollector`` is registered
+    in both. The second pass then re-inserts the same ``(contract_id, snapshot_ts)``
+    rows and violates the primary key.
+
+    The cost is total rather than partial: the rows go in as one executemany, so a
+    single duplicate raises and the collector loses *every* row it gathered. That is
+    how one live run fetched 232 Hyperliquid contracts and stored none of them.
+
+    Skipping is the honest resolution. A second look at the same source at the same
+    instant is a duplicate observation, not a correction, and this leaves the
+    append-only rule intact — no existing fact row is touched. It is checked here
+    rather than inside each collector because a collector writes several tables at
+    several grains (Hyperliquid writes both contract rows and a venue rollup), so a
+    per-table guard has to be repeated per table and is silently incomplete when it
+    is not.
+
+    Only successful fetches count. A source that answered 429 on the earlier pass has
+    observed nothing, and skipping it would turn one throttled minute into a
+    permanent hole.
+    """
+    stmt = (
+        select(FetchLog.source_id)
+        .where(FetchLog.snapshot_ts == snapshot_ts)
+        .where(FetchLog.status.in_((FetchStatus.OK, FetchStatus.PARTIAL)))
+        .distinct()
+    )
+    return set(session.execute(stmt).scalars())
 
 
 def _record_collector_failure(
@@ -386,7 +457,21 @@ def _observations(
 
 def build_scheduler() -> BackgroundScheduler:
     """Assemble the scheduler without starting it, so tests can inspect the jobs."""
-    scheduler = BackgroundScheduler(timezone=settings.scheduler_timezone)
+    scheduler = BackgroundScheduler(
+        timezone=settings.scheduler_timezone,
+        # One worker, so passes queue instead of overlapping. ``max_instances`` below
+        # only stops a job colliding with *itself*; it says nothing about two
+        # different jobs, and the schedule guarantees they meet — hourly fires at :05
+        # and runs for over ten minutes (rate-limited sources are paced, not slow),
+        # while headline fires every fifteen and long_tail at :20. A live run with the
+        # default pool logged 72 ``database is locked`` errors and lost a collector
+        # from every source in the pass.
+        #
+        # Serialising is not merely a database workaround. These collectors share one
+        # egress IP against per-minute limits, so concurrent passes spend the same
+        # budget twice and turn each other's requests into 429s.
+        executors={"default": ThreadPoolExecutor(max_workers=1)},
+    )
 
     scheduler.add_job(
         headline_snapshot,
@@ -396,7 +481,13 @@ def build_scheduler() -> BackgroundScheduler:
         # write two snapshot instants for what is one observation of the market.
         max_instances=1,
         coalesce=True,
-        misfire_grace_time=300,
+        # A full interval, because the single worker above means this job now waits
+        # behind the hourly pass rather than running alongside it. At the previous
+        # 300s it would have been declared a misfire and dropped every hour — trading
+        # 72 lock errors for a guaranteed hole in the series is not an improvement.
+        # Late is fine: a pass is internally consistent whenever it starts, since
+        # every collector in it shares one snapshot instant.
+        misfire_grace_time=900,
     )
     scheduler.add_job(
         hourly_snapshot,

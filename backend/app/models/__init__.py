@@ -35,10 +35,13 @@ from app.models.enums import (
 from app.models.facts import (
     FactAssetSnapshot,
     FactCategorySnapshot,
+    FactIssuerPlatformSnapshot,
+    FactIssuerSnapshot,
     FactPairSnapshot,
     FactPerpContractSnapshot,
     FactPerpVenueSnapshot,
     FactPoolSnapshot,
+    FactUnderlyingReference,
     FactVenueSnapshot,
 )
 from app.models.operations import (
@@ -70,10 +73,13 @@ __all__ = [
     "EntityType",
     "FactAssetSnapshot",
     "FactCategorySnapshot",
+    "FactIssuerPlatformSnapshot",
+    "FactIssuerSnapshot",
     "FactPairSnapshot",
     "FactPerpContractSnapshot",
     "FactPerpVenueSnapshot",
     "FactPoolSnapshot",
+    "FactUnderlyingReference",
     "FactVenueSnapshot",
     "FetchLog",
     "FetchStatus",

@@ -358,6 +358,45 @@ class SourceHealth(BaseModel):
     sample_error: str | None = None
 
 
+class CatalogueCoverage(BaseModel):
+    """How much of the published market we actually index.
+
+    The denominator comes from the issuers themselves, and it is far larger than any
+    aggregator's: xStocks lists over 700 products against roughly 113 CoinGecko
+    carries. Reporting the indexed count alone reads as the size of the market when
+    it is a fraction of one issuer's range.
+    """
+
+    #: Assets we index and can rank. In-scope tiers only.
+    indexed_assets: int
+    #: What the issuers say they offer, summed over the issuers who publish a count.
+    #: Null when nobody does — an unknown denominator is not a denominator of zero.
+    official_products: int | None = None
+    #: ``indexed_assets / official_products``. Null when the denominator is unknown,
+    #: never 1.0: "we see everything" is a claim, not a default.
+    ratio: float | None = None
+    #: How many issuers contributed to the denominator, and how many exist. A ratio
+    #: built on two issuers out of nine is a different statement from a full one.
+    issuers_with_count: int = 0
+    issuer_count: int = 0
+
+
+class ReferenceCoverage(BaseModel):
+    """How many tracked underlyings have a TradFi price to be compared against."""
+
+    #: Underlyings carried by at least one in-scope asset or perp contract.
+    tracked_underlyings: int
+    #: Of those, how many a reference feed quoted at the latest snapshot.
+    priced_underlyings: int
+    #: The feed those prices came from (``iex``, ``sip``). Null when none ran.
+    feed: str | None = None
+    #: Age of the oldest reference price in minutes. Large is normal and not an
+    #: error: the underlying market is shut most of the hours this system collects.
+    max_age_minutes: int | None = None
+    #: Why the figures above are empty, when they are. Null when the source ran.
+    unavailable_reason: str | None = None
+
+
 class DataQuality(BaseModel):
     meta: Meta
     sources: list[SourceHealth]
@@ -367,6 +406,42 @@ class DataQuality(BaseModel):
     pending_mappings: int
     #: Venues whose adjusted turnover is under a tenth of their raw turnover.
     divergent_venues: list[str]
+    catalogue: CatalogueCoverage
+    reference: ReferenceCoverage
+
+
+class BenchmarkRow(BaseModel):
+    """One tokenized wrapper beside the security it wraps."""
+
+    underlying_id: str
+    underlying_name: str
+    asset_id: str
+    symbol: str
+    issuer_id: str | None = None
+    #: Last observed price of the token, in USD.
+    token_price: Decimal | None = None
+    #: Last trade of the underlying on the reference feed.
+    reference_price: Decimal | None = None
+    #: When that trade happened at the source — not when we read it.
+    reference_price_ts: datetime | None = None
+    #: Gap between the two timestamps. Hours or days here is the normal state
+    #: outside RTH and is the context the basis below has to be read in.
+    reference_age_minutes: int | None = None
+    feed: str | None = None
+    #: ``token_price / reference_price - 1``. Null when either side is missing.
+    basis: float | None = None
+    token_change_24h: Decimal | None = None
+    reference_change_24h: Decimal | None = None
+    #: Market session of the *underlying* when the reference was taken.
+    market_session: MarketSession | None = None
+
+
+class BenchmarkList(BaseModel):
+    meta: Meta
+    rows: list[BenchmarkRow]
+    #: Set when no reference source has run. The UI shows the reason rather than an
+    #: empty table, which would read as "no token trades near its share price".
+    unavailable_reason: str | None = None
 
 
 class ReportRow(BaseModel):

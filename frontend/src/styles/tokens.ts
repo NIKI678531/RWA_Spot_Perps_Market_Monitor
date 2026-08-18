@@ -10,6 +10,8 @@
  * stylesheet is imported before the first render, so the real value is always there.
  */
 
+import type { ThemeConfig } from 'antd';
+
 export function cssVar(name: string, fallback: string): string {
   if (typeof window === 'undefined' || typeof document === 'undefined') return fallback;
   const value = getComputedStyle(document.body).getPropertyValue(name).trim();
@@ -62,5 +64,67 @@ export function readAntdTokens(): AntdSeedTokens {
       'Inter, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif',
     ),
     fontSize: pixels('--text-body-md-size', 14),
+  };
+}
+
+/**
+ * Per-component overrides, read at the same moment as the seed tokens.
+ *
+ * antd draws a tooltip on `colorBgSpotlight`, which defaults to near-opaque black in
+ * both algorithms. That is the wrong surface here and it is not a small mistake:
+ * `AmountValue` puts a tooltip on every amount in the app, so pointing at a figure
+ * drops a black slab over the figure you were reading. DESIGN.md `components.popover`
+ * defines a pop layer as `surface-strong` + `text` + `rounded.xl`, so the tokens are
+ * pointed at exactly those.
+ *
+ * Scoped under `Tooltip` rather than set as a seed alias: a spotlight surface is a
+ * legitimate thing for some other component to want, and this is a statement about
+ * tooltips, not about the palette.
+ */
+export function readAntdComponentTokens(): ThemeConfig['components'] {
+  const border = cssVar('--color-border', 'rgba(100,116,139,0.35)');
+  const primaryContainer = cssVar('--color-primary-container', 'rgba(35,97,173,0.12)');
+
+  return {
+    // antd's own table chrome would double the card's surface; the glass card
+    // underneath is the surface, so the table draws only rows and dividers.
+    //
+    // Every state surface below is antd's, and antd derives all of them from the
+    // `colorFill*` ramp — which is plain black at a low alpha in the light algorithm.
+    // Over a glass card that reads as a dirty grey slab across the row you are
+    // pointing at. They are all pointed at the primary container instead: one tint,
+    // stated as an alpha, so a highlighted row is tinted rather than covered.
+    Table: {
+      headerBg: 'transparent',
+      borderColor: border,
+      rowHoverBg: primaryContainer,
+      rowSelectedBg: primaryContainer,
+      rowSelectedHoverBg: primaryContainer,
+      rowExpandedBg: 'transparent',
+      bodySortBg: 'transparent',
+      headerSortActiveBg: 'transparent',
+      headerSortHoverBg: primaryContainer,
+      headerFilterHoverBg: primaryContainer,
+      footerBg: 'transparent',
+      filterDropdownBg: cssVar('--color-surface-strong', '#FFFFFFEB'),
+      expandIconBg: 'transparent',
+      stickyScrollBarBg: cssVar('--color-border-strong', 'rgba(100,116,139,0.55)'),
+    },
+    // Same call as the `.tag-*` classes in pages.css: outline and text, no fill.
+    // antd's default tag fills with `colorFillQuaternary`, which is black at a low
+    // alpha and greys out whatever it sits on.
+    Tag: {
+      defaultBg: 'transparent',
+      defaultColor: cssVar('--color-text-secondary', '#64748B'),
+    },
+    Tooltip: {
+      colorBgSpotlight: cssVar('--color-surface-strong', '#FFFFFFEB'),
+      colorTextLightSolid: cssVar('--color-text', '#1E293B'),
+      borderRadius: pixels('--rounded-xl', 16),
+      boxShadowSecondary: cssVar(
+        '--elevation-3',
+        '0 12px 32px rgba(17, 24, 39, 0.1)',
+      ),
+    },
   };
 }

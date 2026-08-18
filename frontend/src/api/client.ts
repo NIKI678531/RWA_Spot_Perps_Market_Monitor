@@ -7,6 +7,7 @@
 import type {
   AlertDetail,
   AlertList,
+  BenchmarkList,
   CategoryScale,
   DataQuality,
   ExecutiveKpi,
@@ -14,6 +15,7 @@ import type {
   PairList,
   PerpContractList,
   PerpDexList,
+  PerpVenueList,
   ReportList,
   Timeseries,
   VenueRanking,
@@ -103,6 +105,12 @@ export const api = {
 
   perpDexs: (signal?: AbortSignal) =>
     getJson<PerpDexList>('/perps/dexs', undefined, signal),
+
+  perpVenues: (signal?: AbortSignal) =>
+    getJson<PerpVenueList>('/perps/venues', undefined, signal),
+
+  benchmark: (params?: { limit?: number }, signal?: AbortSignal) =>
+    getJson<BenchmarkList>('/benchmark', params, signal),
 
   alerts: (
     params?: { severity?: string; status?: string; family?: string; limit?: number },

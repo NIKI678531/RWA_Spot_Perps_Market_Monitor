@@ -70,6 +70,9 @@ class DimensionCache:
     _contracts: dict[str, DimPerpContract] = field(default_factory=dict)
     _issuers: dict[str, DimIssuer] = field(default_factory=dict)
     _pools: dict[str, DimPool] = field(default_factory=dict)
+    #: ``(source_id, source_symbol)`` pairs that already have an ``underlying_map``
+    #: row, including ones added earlier in this pass. See ``_record_mapping``.
+    _mapped: set[tuple[str, str]] = field(default_factory=set)
     #: Symbols this pass could not map. Surfaced on the data-quality page rather than
     #: guessed at; see ``underlying_map``.
     unmapped: list[underlying_map.MappingResult] = field(default_factory=list)
@@ -92,6 +95,12 @@ class DimensionCache:
             cache._issuers[issuer.issuer_id] = issuer
         for pool in session.execute(select(DimPool)).scalars():
             cache._pools[pool.pool_id] = pool
+        cache._mapped = {
+            (source_id, source_symbol)
+            for source_id, source_symbol in session.execute(
+                select(UnderlyingMap.source_id, UnderlyingMap.source_symbol)
+            ).all()
+        }
         return cache
 
     # --- issuers -----------------------------------------------------------
@@ -184,13 +193,19 @@ class DimensionCache:
 
         An automatic mapping nobody can explain is worse than no mapping, and an
         unresolved symbol that leaves no trace is one nobody ever reviews.
+
+        The already-seen set is held in memory rather than re-queried per symbol.
+        That is not only cheaper — it is the only thing that works here. ``SessionLocal``
+        sets ``autoflush=False``, so a ``SELECT`` cannot see rows this same pass has
+        added but not yet flushed, and two coins sharing a symbol would each read
+        "absent" and insert. CoinGecko lists several: two distinct coins both spelled
+        ``spcx``. The resulting duplicate key aborted the flush and cost the collector
+        every asset, pair and category row it had gathered.
         """
-        stmt = select(UnderlyingMap).where(
-            UnderlyingMap.source_id == source_id,
-            UnderlyingMap.source_symbol == mapping.source_symbol,
-        )
-        if self.session.execute(stmt).scalars().first() is not None:
+        key = (source_id, mapping.source_symbol)
+        if key in self._mapped:
             return
+        self._mapped.add(key)
         self.session.add(
             UnderlyingMap(
                 source_id=source_id,
@@ -294,7 +309,17 @@ class DimensionCache:
         symbol: str,
         perp_dex: str | None = None,
         source_underlying_type: str | None = None,
+        source_symbol: str | None = None,
     ) -> DimPerpContract:
+        """Return the contract row, creating and mapping it if it is new.
+
+        ``symbol`` is the exchange's own contract name, kept verbatim for
+        reconciliation; ``source_symbol`` is what gets resolved, defaulting to it.
+        They differ on venues whose contract name carries a quote suffix —
+        ``AAPL-USDT-SWAP`` resolves to nothing, while the ``AAPL`` left after the
+        caller strips its own quote grammar resolves exactly. Without this, every
+        contract on such a venue lands in the review queue despite having mapped.
+        """
         existing = self._contracts.get(contract_id)
         if existing is not None:
             # The exchange's own label is stored verbatim and only ever filled in,
@@ -304,7 +329,9 @@ class DimensionCache:
             )
             return existing
 
-        mapping = underlying_map.resolve(symbol, self.known_underlyings)
+        mapping = underlying_map.resolve(
+            source_symbol or symbol, self.known_underlyings
+        )
         if not mapping.resolved:
             self.unmapped.append(mapping)
         contract = DimPerpContract(
@@ -347,6 +374,95 @@ def venue_hint(name: str) -> tuple[VenueType, str | None]:
 
 def known_underlying_ids(session: Session) -> set[str]:
     return set(session.execute(select(DimUnderlying.underlying_id)).scalars())
+
+
+@dataclass(frozen=True, slots=True)
+class Reresolution:
+    """What a re-resolution pass changed, for the operator who ran it."""
+
+    examined: int
+    resolved: int
+    retiered: int
+
+
+def reresolve_unmapped(session: Session) -> Reresolution:
+    """Re-run resolution for assets that never resolved, after the rules improve.
+
+    ``ensure_asset`` fills blanks and never rewrites, which is right for a reviewer's
+    correction and wrong for a corrected *rule*: an asset classified by a broken rule
+    stays broken forever, because nothing ever asks it again. That is not theoretical.
+    A missing lowercase suffix left 49 tokenized equities — Apple, Nvidia, Tesla —
+    resolving to nothing and therefore tiered NON_RWA, which excluded them from every
+    ranking, rollup and alert. Widening ``dim_underlying`` strands rows the same way.
+
+    Deliberately narrow, so it can be run without reading the diff first:
+
+    - Only assets with no underlying. A resolved mapping is never second-guessed.
+    - Only mappings no human has touched. ``reviewed_by`` is the veto, and it wins.
+    - Tier is recomputed from the asset's *current* issuer, so a row that gained an
+      issuer since it was created lands at CORE_RWA rather than staying SYNTHETIC.
+
+    An asset that still does not resolve is left exactly as it is, including its
+    NON_RWA tier — being unable to name the underlying security is precisely the
+    reason that tier exists.
+    """
+    known = known_underlying_ids(session)
+    # Case-folded, unlike resolution itself. Both spellings tried below come from one
+    # asset, so the question is whether a human has ruled on *this* asset — and if
+    # they have, the conservative reading of their silence is to leave it alone.
+    # Erring this way costs an unresolved row somebody can fix by hand; erring the
+    # other way overwrites a decision they already made.
+    reviewed = {
+        symbol.lower()
+        for symbol in session.execute(
+            select(UnderlyingMap.source_symbol).where(
+                UnderlyingMap.reviewed_by.is_not(None)
+            )
+        ).scalars()
+    }
+    stranded = list(
+        session.execute(
+            select(DimAsset).where(DimAsset.underlying_id.is_(None))
+        ).scalars()
+    )
+
+    resolved = retiered = 0
+    for asset in stranded:
+        mapping = _resolve_either_casing(asset.symbol, known, reviewed)
+        if mapping is None:
+            continue
+
+        asset.underlying_id = mapping.underlying_id
+        resolved += 1
+        decision = classify_tier(
+            symbol=asset.symbol,
+            issuer_id=asset.issuer_id,
+            underlying_id=mapping.underlying_id,
+        )
+        if decision.tier is not asset.rwa_tier:
+            asset.rwa_tier = decision.tier
+            retiered += 1
+
+    return Reresolution(examined=len(stranded), resolved=resolved, retiered=retiered)
+
+
+def _resolve_either_casing(
+    symbol: str, known: set[str], reviewed: set[str]
+) -> underlying_map.MappingResult | None:
+    """Resolve a display symbol, trying the casing its source would have sent.
+
+    ``ensure_asset`` resolves the source spelling, but only the display symbol
+    survives on the row. Both casings are tried because the suffix rules are
+    case-sensitive on purpose and it is the source's own casing that maps: CoinGecko
+    sends ``aaplb``, a venue sends ``AAPLB``, and they are the same asset.
+    """
+    if symbol.lower() in reviewed:
+        return None
+    for spelling in (symbol, symbol.lower()):
+        mapping = underlying_map.resolve(spelling, known)
+        if mapping.resolved:
+            return mapping
+    return None
 
 
 def tiers_of(assets: Iterable[DimAsset]) -> dict[str, RwaTier]:

@@ -8,6 +8,7 @@ ability to say how the market describes itself.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
@@ -23,26 +24,51 @@ from app.services.ingest.base import Collector, FetchResult, HttpFetcher
 from app.services.normalize.dedup import CoinObservation, build_rows
 from app.services.normalize.dimensions import DimensionCache
 
+logger = logging.getLogger(__name__)
+
 SOURCE_ID = "coingecko"
+
+#: Requests per minute, by whether a key is configured. A demo key buys ~30/min; the
+#: keyless public endpoint is documented at 5–15 and answers 429 above it. Asking for
+#: 30 without one is how a live pass got 429 on all five categories and stored
+#: nothing: the ceiling is enforced remotely, so exceeding it costs the request *and*
+#: the backoff, and no amount of retrying gets under a limit already breached.
+RATE_LIMIT_WITH_KEY = 30
+RATE_LIMIT_KEYLESS = 10
+
+#: Ticker calls are one request per coin, so ``ticker_depth`` alone sets how long a
+#: pass runs. At the keyless budget the six-hourly depth of 150 would hold a thread
+#: for a quarter of an hour. Capped — and the cap is logged rather than applied
+#: quietly, because a coverage number that silently shrank still reads as full
+#: coverage.
+KEYLESS_TICKER_CAP = 40
 
 #: The five overlapping categories, in the order the union prefers them. Tokenized
 #: Stock first: it is the broadest and its metadata is the most complete, so it wins
 #: conflicts on shared coins.
+#:
+#: These are CoinGecko ``category_id`` slugs from ``/coins/categories/list``, not the
+#: display names. Four of the five were originally guessed from the display name and
+#: every one of those 404'd, so the collector ran on ``tokenized-stock`` alone: no
+#: issuer was ever attributed, which demoted every custodied wrapper from CORE_RWA to
+#: SYNTHETIC, and the "deduplicated union" was a union of one. A 404 is logged as
+#: NOT_VERIFIED and correctly contributes nothing, so nothing about the output looked
+#: wrong — the totals were simply built from a fifth of the market.
 CATEGORIES: tuple[str, ...] = (
     "tokenized-stock",
-    "tokenized-etf",
-    "ondo-finance-ecosystem",
-    "xstocks",
-    "bstocks",
+    "tokenized-exchange-traded-funds-etfs",
+    "ondo-tokenized-assets",
+    "xstocks-ecosystem",
+    "bstocks-ecosystem",
 )
 
 #: Which issuer a category implies. Only the single-issuer categories appear: a coin
 #: found under "tokenized-stock" says nothing about who wrapped it, and inventing an
 #: issuer there would put the wrong name on a competitive ranking.
 CATEGORY_ISSUERS: Mapping[str, str] = {
-    "xstocks": "xStocks",
-    "bstocks": "bStocks",
-    "ondo-finance-ecosystem": "Ondo",
+    "xstocks-ecosystem": "xStocks",
+    "bstocks-ecosystem": "bStocks",
+    "ondo-tokenized-assets": "Ondo",
 }
 
 #: CoinGecko's own data-hygiene markers. They describe the quote, not the market.
@@ -81,7 +107,8 @@ class CoinGeckoCollector(Collector):
     source_id: str = SOURCE_ID
     categories: Sequence[str] = CATEGORIES
     #: How many coins per category to pull tickers for. Ticker calls are one request
-    #: per coin, which is the binding constraint on a 30 req/min budget.
+    #: per coin, which is the binding constraint on the request budget — see
+    #: ``KEYLESS_TICKER_CAP`` for what happens to this number without a key.
     ticker_depth: int = 25
 
     def _fetcher(self) -> HttpFetcher:
@@ -93,9 +120,26 @@ class CoinGeckoCollector(Collector):
         return HttpFetcher(
             source_id=self.source_id,
             base_url=settings.coingecko_base_url,
-            rate_limit_per_minute=30,
+            rate_limit_per_minute=(
+                RATE_LIMIT_WITH_KEY
+                if settings.coingecko_api_key
+                else RATE_LIMIT_KEYLESS
+            ),
             headers=headers,
         )
+
+    def _effective_ticker_depth(self) -> int:
+        """``ticker_depth``, lowered to what the keyless budget can actually spend."""
+        if settings.coingecko_api_key or self.ticker_depth <= KEYLESS_TICKER_CAP:
+            return self.ticker_depth
+        logger.info(
+            "coingecko has no API key: ticker depth %d -> %d, %d coins get category "
+            "and asset rows but no venue-level pairs this pass",
+            self.ticker_depth,
+            KEYLESS_TICKER_CAP,
+            self.ticker_depth - KEYLESS_TICKER_CAP,
+        )
+        return KEYLESS_TICKER_CAP
 
     def collect(self, session: Session, snapshot_ts: datetime) -> list[FetchResult]:
         market_session = classify_session(snapshot_ts)
@@ -133,6 +177,16 @@ class CoinGeckoCollector(Collector):
                     # A failed category is a missing observation. It contributes no
                     # rows, and the union below is marked partial by safe_sum.
                     per_category[category] = []
+                    if result.http_status == 404:
+                        # Worth separating from the rate limits and timeouts around
+                        # it: 404 is CoinGecko saying this category does not exist,
+                        # which no retry fixes and which four of our five slugs did
+                        # for weeks. Every other failure here is transient.
+                        logger.error(
+                            "CoinGecko category %r does not exist (404). The slug is "
+                            "wrong, not the network — check /coins/categories/list.",
+                            category,
+                        )
                     continue
 
                 coins = [c for c in result.payload if isinstance(c, dict)]
@@ -200,7 +254,7 @@ class CoinGeckoCollector(Collector):
                     )
                 )
 
-            for coin_id in ranked[: self.ticker_depth]:
+            for coin_id in ranked[: self._effective_ticker_depth()]:
                 result = fetcher.get_json(f"/coins/{coin_id}/tickers")
                 results.append(result)
                 if not result.ok or not isinstance(result.payload, dict):

@@ -301,11 +301,30 @@ body {
   color: var(--color-text-secondary);
 }
 
+/*
+ * The brand gradient appears on exactly three things in this app, and all three are
+ * 3px marks that answer "where am I": the rail's active bar, an alert's severity bar,
+ * and this. DESIGN.md principle 4 names the title underline as a sanctioned accent —
+ * a short rule, not a filled heading.
+ */
 .page-title {
-  margin: 0;
+  position: relative;
+  margin: 0 0 var(--spacing-sm);
+  padding-bottom: var(--spacing-sm);
   font-size: var(--text-h1-size);
   font-weight: var(--text-h1-weight);
   line-height: var(--text-h1-line);
+}
+
+.page-title::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: var(--spacing-xl);
+  height: 3px;
+  border-radius: var(--rounded-pill);
+  background: var(--gradient-primary);
 }
 
 .section-title {
@@ -516,6 +535,17 @@ body {
 .ant-table-wrapper .ant-table-tbody > tr > td {
   border-bottom: 0;
 }
+
+/*
+ * The tooltip's colour, radius and shadow are set on the ConfigProvider theme, so
+ * nothing about it belongs here.
+ *
+ * It deliberately does NOT get a `backdrop-filter` even though the rest of the app's
+ * surfaces do. `--color-surface-strong` is already 92% opaque, so a blur behind it is
+ * invisible, and a blurred backdrop inside a popup that floats above cards which are
+ * themselves blurred is the arrangement Chromium is known to fall back to painting as
+ * a black box. Invisible upside, and the downside is the exact defect being fixed.
+ */
 
 /* ===== 响应式 (UI-LAYOUT.md §5) =========================================== */
 

@@ -80,6 +80,62 @@ THEMES: tuple[ThemeSpec, ...] = (
         "Private-company exposure. No public reference price exists, so anomaly "
         "detection here has no benchmark to fall back on.",
     ),
+    ThemeSpec(
+        "financials",
+        "金融",
+        "Financials",
+        "Banks, brokers, card networks and alternative asset managers.",
+    ),
+    ThemeSpec(
+        "healthcare",
+        "医疗健康",
+        "Healthcare",
+        "Pharma, biotech and medical devices.",
+    ),
+    ThemeSpec(
+        "energy_materials",
+        "能源与资源",
+        "Energy & Materials",
+        "Oil, refiners, industrial metals and miners. Gold *miners* sit here rather "
+        "than under precious metals: the miner and the metal are two exposures, and "
+        "the benchmark note on gold says so explicitly.",
+    ),
+    ThemeSpec(
+        "consumer_industrial",
+        "消费与工业",
+        "Consumer & Industrials",
+        "Retail, travel, restaurants, media and capital goods. Includes the "
+        "meme-adjacent names whose wrappers trade on retail attention.",
+    ),
+    ThemeSpec(
+        "space_defense",
+        "太空与国防",
+        "Space & Defense",
+        "Launch, satellites, drones and primes. The most-wrapped theme after AI on "
+        "the cross-venue perp exchanges.",
+    ),
+    ThemeSpec(
+        "quantum",
+        "量子计算",
+        "Quantum Computing",
+        "Held apart from AI semis: these are pre-revenue and move on announcements, "
+        "so a spike here is not comparable with one in a fab-scale name.",
+    ),
+    ThemeSpec(
+        "nuclear_power",
+        "核电与电力",
+        "Nuclear & Power",
+        "SMR developers, independent power producers and grid equipment — the "
+        "second-order AI trade.",
+    ),
+    ThemeSpec(
+        "asia_tech",
+        "亚洲科技股",
+        "Asia-listed Technology",
+        "Tokyo, Seoul, Hong Kong and Shenzhen listings. Their cash markets are shut "
+        "during US hours *and* during most crypto trading, so their market_session "
+        "stratification differs from the US names and must not be pooled with them.",
+    ),
 )
 
 BENCHMARKS: tuple[tuple[str, str, str], ...] = (
@@ -91,6 +147,310 @@ BENCHMARKS: tuple[tuple[str, str, str], ...] = (
     ),
     ("nasdaq100", "Nasdaq 100", "QQQ and the underlying index."),
     ("gold", "Gold", "Spot gold, gold ETFs and gold miners are not one exposure."),
+)
+
+
+def _equities(
+    region: str, theme: str | None, rows: tuple[tuple[str, str], ...]
+) -> tuple[UnderlyingSpec, ...]:
+    """Expand ``(ticker, name)`` pairs sharing a region and a theme.
+
+    Each pair stays on its own line, so a row is still one legible claim that one
+    named security exists. Region and theme are factored out because repeating them
+    forty times per block buries the ticker, which is the part that has to be right.
+    """
+    return tuple(
+        UnderlyingSpec(ticker, name, AssetClass.EQUITY, region, theme)
+        for ticker, name in rows
+    )
+
+
+#
+# The blocks below were read off the venues' live contract lists, not composed from
+# memory: MEXC alone lists 283 ``*STOCK`` perpetuals, and against the original 53-row
+# seed only 30 of them resolved — the other 253 fell into PENDING_REVIEW, which is
+# the correct behaviour and also a near-total blind spot on the largest tokenized
+# equity perp universe in existence. Every ticker here appears in a venue listing.
+#
+
+_AI_SEMIS = (
+    ("AMAT", "Applied Materials Inc."),
+    ("LRCX", "Lam Research Corp."),
+    ("KLAC", "KLA Corp."),
+    ("ASML", "ASML Holding ADR"),
+    ("SNPS", "Synopsys Inc."),
+    ("CDNS", "Cadence Design Systems"),
+    ("MRVL", "Marvell Technology"),
+    ("TXN", "Texas Instruments"),
+    ("QCOM", "Qualcomm Inc."),
+    ("ANET", "Arista Networks"),
+    ("GFS", "GlobalFoundries Inc."),
+    ("TER", "Teradyne Inc."),
+    ("ENTG", "Entegris Inc."),
+    ("COHR", "Coherent Corp."),
+    ("LITE", "Lumentum Holdings"),
+    ("CRDO", "Credo Technology Group"),
+    ("ALAB", "Astera Labs Inc."),
+    ("SITM", "SiTime Corp."),
+    ("MTSI", "MACOM Technology Solutions"),
+    ("NVTS", "Navitas Semiconductor"),
+    ("AEHR", "Aehr Test Systems"),
+    ("AXTI", "AXT Inc."),
+    ("AAOI", "Applied Optoelectronics"),
+    ("POET", "POET Technologies"),
+    ("TSEM", "Tower Semiconductor"),
+    ("ON", "ON Semiconductor Corp."),
+    ("SNDK", "SanDisk Corp."),
+    ("STX", "Seagate Technology Holdings"),
+    ("WDC", "Western Digital Corp."),
+    ("NTAP", "NetApp Inc."),
+    ("DELL", "Dell Technologies"),
+    ("HPE", "Hewlett Packard Enterprise"),
+    ("CRWV", "CoreWeave Inc."),
+    ("NBIS", "Nebius Group"),
+    ("APLD", "Applied Digital Corp."),
+    ("VRT", "Vertiv Holdings"),
+    ("GLW", "Corning Inc."),
+    ("JBL", "Jabil Inc."),
+    ("FLEX", "Flex Ltd."),
+    ("CIEN", "Ciena Corp."),
+    ("MXL", "MaxLinear Inc."),
+    ("PENG", "Penguin Solutions"),
+)
+
+_MEGACAP_TECH = (
+    ("ADBE", "Adobe Inc."),
+    ("ORCL", "Oracle Corp."),
+    ("CRM", "Salesforce Inc."),
+    ("CSCO", "Cisco Systems"),
+    ("IBM", "International Business Machines"),
+    ("INTU", "Intuit Inc."),
+    ("NOW", "ServiceNow Inc."),
+    ("SHOP", "Shopify Inc."),
+    ("SPOT", "Spotify Technology"),
+    ("RBLX", "Roblox Corp."),
+    ("RDDT", "Reddit Inc."),
+    ("SNOW", "Snowflake Inc."),
+    ("NET", "Cloudflare Inc."),
+    ("DDOG", "Datadog Inc."),
+    ("CRWD", "CrowdStrike Holdings"),
+    ("PANW", "Palo Alto Networks"),
+    ("FTNT", "Fortinet Inc."),
+    ("ZM", "Zoom Communications"),
+    ("TWLO", "Twilio Inc."),
+    ("HUBS", "HubSpot Inc."),
+    ("WDAY", "Workday Inc."),
+    ("VEEV", "Veeva Systems"),
+    ("DOCU", "DocuSign Inc."),
+    ("PAYC", "Paycom Software"),
+    ("EBAY", "eBay Inc."),
+    ("BKNG", "Booking Holdings"),
+    ("EXPE", "Expedia Group"),
+    ("APP", "AppLovin Corp."),
+    ("FIG", "Figma Inc."),
+    ("CHYM", "Chime Financial"),
+    ("RBRK", "Rubrik Inc."),
+    ("CTSH", "Cognizant Technology Solutions"),
+)
+
+_FINANCIALS = (
+    ("BAC", "Bank of America Corp."),
+    ("C", "Citigroup Inc."),
+    ("GS", "Goldman Sachs Group"),
+    ("MS", "Morgan Stanley"),
+    ("BLK", "BlackRock Inc."),
+    ("BX", "Blackstone Inc."),
+    ("KKR", "KKR & Co."),
+    ("APO", "Apollo Global Management"),
+    ("COF", "Capital One Financial"),
+    ("SYF", "Synchrony Financial"),
+    ("IBKR", "Interactive Brokers Group"),
+    ("SOFI", "SoFi Technologies"),
+    ("NU", "Nu Holdings"),
+    ("PYPL", "PayPal Holdings"),
+    ("GPN", "Global Payments Inc."),
+    ("FUTU", "Futu Holdings ADR"),
+    ("AON", "Aon plc"),
+    ("AJG", "Arthur J. Gallagher & Co."),
+    ("AXP", "American Express Co."),
+)
+
+_HEALTHCARE = (
+    ("LLY", "Eli Lilly & Co."),
+    ("UNH", "UnitedHealth Group"),
+    ("AMGN", "Amgen Inc."),
+    ("GILD", "Gilead Sciences"),
+    ("REGN", "Regeneron Pharmaceuticals"),
+    ("VRTX", "Vertex Pharmaceuticals"),
+    ("BIIB", "Biogen Inc."),
+    ("ISRG", "Intuitive Surgical"),
+    ("DXCM", "DexCom Inc."),
+    ("IQV", "IQVIA Holdings"),
+    ("NTRA", "Natera Inc."),
+    ("THC", "Tenet Healthcare"),
+    ("HIMS", "Hims & Hers Health"),
+    ("ARWR", "Arrowhead Pharmaceuticals"),
+    ("NVO", "Novo Nordisk ADR"),
+    ("AZN", "AstraZeneca ADR"),
+    ("TEM", "Tempus AI"),
+)
+
+_ENERGY_MATERIALS = (
+    ("CVX", "Chevron Corp."),
+    ("COP", "ConocoPhillips"),
+    ("OXY", "Occidental Petroleum"),
+    ("SLB", "SLB"),
+    ("HAL", "Halliburton Co."),
+    ("BKR", "Baker Hughes Co."),
+    ("MPC", "Marathon Petroleum"),
+    ("VLO", "Valero Energy"),
+    ("DVN", "Devon Energy"),
+    ("FCX", "Freeport-McMoRan"),
+    ("SCCO", "Southern Copper Corp."),
+    ("NEM", "Newmont Corp."),
+    ("TECK", "Teck Resources"),
+    ("WPM", "Wheaton Precious Metals"),
+    ("CCJ", "Cameco Corp."),
+    ("CDE", "Coeur Mining"),
+    ("AA", "Alcoa Corp."),
+    ("LIN", "Linde plc"),
+    ("APD", "Air Products & Chemicals"),
+    ("ADM", "Archer-Daniels-Midland"),
+    # NYSE ticker of the miner, not the metal. XAU above is spot gold, and the two
+    # are the exposures the gold benchmark note warns against conflating.
+    ("AU", "AngloGold Ashanti ADR"),
+    ("USAR", "USA Rare Earth"),
+)
+
+_CONSUMER_INDUSTRIAL = (
+    ("COST", "Costco Wholesale"),
+    ("PEP", "PepsiCo Inc."),
+    ("SBUX", "Starbucks Corp."),
+    ("NKE", "Nike Inc."),
+    ("HD", "Home Depot Inc."),
+    ("MAR", "Marriott International"),
+    ("RCL", "Royal Caribbean Group"),
+    ("CCL", "Carnival Corp."),
+    ("AAL", "American Airlines Group"),
+    ("DPZ", "Domino's Pizza"),
+    ("WEN", "Wendy's Co."),
+    ("WING", "Wingstop Inc."),
+    ("CAVA", "CAVA Group"),
+    ("BROS", "Dutch Bros Inc."),
+    ("EAT", "Brinker International"),
+    ("CELH", "Celsius Holdings"),
+    ("KHC", "Kraft Heinz Co."),
+    ("DKNG", "DraftKings Inc."),
+    ("TTWO", "Take-Two Interactive Software"),
+    ("FLUT", "Flutter Entertainment"),
+    ("GRAB", "Grab Holdings"),
+    ("OPEN", "Opendoor Technologies"),
+    ("HTZ", "Hertz Global Holdings"),
+    ("AMC", "AMC Entertainment Holdings"),
+    ("GME", "GameStop Corp."),
+    ("RIVN", "Rivian Automotive"),
+    ("CAT", "Caterpillar Inc."),
+    ("FAST", "Fastenal Co."),
+    ("WAB", "Westinghouse Air Brake Technologies"),
+    ("ROL", "Rollins Inc."),
+    ("CMCSA", "Comcast Corp."),
+    ("FOXA", "Fox Corp. Class A"),
+    ("APH", "Amphenol Corp."),
+    ("QXO", "QXO Inc."),
+)
+
+_SPACE_DEFENSE = (
+    ("RKLB", "Rocket Lab Corp."),
+    ("ASTS", "AST SpaceMobile"),
+    ("LUNR", "Intuitive Machines"),
+    ("RDW", "Redwire Corp."),
+    ("AVAV", "AeroVironment Inc."),
+    ("KRMN", "Karman Holdings"),
+    ("RCAT", "Red Cat Holdings"),
+    ("PL", "Planet Labs PBC"),
+    ("ONDS", "Ondas Holdings"),
+    ("OUST", "Ouster Inc."),
+    ("AXON", "Axon Enterprise"),
+    ("LHX", "L3Harris Technologies"),
+    ("LMT", "Lockheed Martin"),
+    ("RTX", "RTX Corp."),
+    ("GE", "GE Aerospace"),
+)
+
+_QUANTUM = (
+    ("IONQ", "IonQ Inc."),
+    ("RGTI", "Rigetti Computing"),
+    ("QBTS", "D-Wave Quantum"),
+)
+
+_NUCLEAR_POWER = (
+    ("OKLO", "Oklo Inc."),
+    ("SMR", "NuScale Power"),
+    ("VST", "Vistra Corp."),
+    ("GEV", "GE Vernova"),
+    ("ETN", "Eaton Corp."),
+    ("ROK", "Rockwell Automation"),
+    ("ENPH", "Enphase Energy"),
+    ("FLNC", "Fluence Energy"),
+    ("BE", "Bloom Energy"),
+)
+
+_CRYPTO_PROXY = (
+    ("BMNR", "BitMine Immersion Technologies"),
+    ("CLSK", "CleanSpark Inc."),
+    ("HUT", "Hut 8 Corp."),
+    ("IREN", "IREN Ltd."),
+    ("XYZ", "Block Inc."),
+)
+
+#: ADRs and foreign-domiciled names that trade on a US exchange. Region is the
+#: listing venue, not the domicile — the market_session that governs a wrapper is
+#: the one its reference price comes from.
+_US_LISTED_FOREIGN = (
+    ("BABA", "Alibaba Group ADR"),
+    ("JD", "JD.com ADR"),
+    ("PDD", "PDD Holdings ADR"),
+    ("BIDU", "Baidu ADR"),
+    ("NIO", "NIO ADR"),
+    ("NOK", "Nokia ADR"),
+    ("ASX", "ASE Technology Holding ADR"),
+    ("MUFG", "Mitsubishi UFJ Financial Group ADR"),
+    ("SONY", "Sony Group ADR"),
+    ("BB", "BlackBerry Ltd."),
+)
+
+_JAPAN = (
+    ("SOFTBANK", "SoftBank Group Corp."),
+    ("TOKYOEL", "Tokyo Electron Ltd."),
+    ("ADVANTEST", "Advantest Corp."),
+    ("LASERTEC", "Lasertec Corp."),
+    ("KIOXIA", "Kioxia Holdings"),
+    ("MURATA", "Murata Manufacturing"),
+    ("SUMIELEC", "Sumitomo Electric Industries"),
+    ("MITSUBISHI", "Mitsubishi Corp."),
+)
+
+_KOREA = (
+    ("SAMSUNG", "Samsung Electronics"),
+    ("SKHYNIX", "SK hynix"),
+    ("SKSQUARE", "SK Square"),
+    ("HYUNDAI", "Hyundai Motor Co."),
+    ("NAVER", "NAVER Corp."),
+    ("SAMSUNGEM", "Samsung Electro-Mechanics"),
+    ("HANMI", "Hanmi Semiconductor"),
+)
+
+_HONG_KONG = (
+    ("TENCENT", "Tencent Holdings"),
+    ("XIAOMI", "Xiaomi Corp."),
+    ("MEITUAN", "Meituan"),
+    ("KUAISHOU", "Kuaishou Technology"),
+    ("POPMART", "Pop Mart International Group"),
+)
+
+_MAINLAND_CHINA = (
+    ("ZHONGJI", "Zhongji Innolight"),
+    ("GIGADEV", "GigaDevice Semiconductor"),
 )
 
 UNDERLYINGS: tuple[UnderlyingSpec, ...] = (
@@ -210,6 +570,47 @@ UNDERLYINGS: tuple[UnderlyingSpec, ...] = (
     UnderlyingSpec(
         "ANTHROPIC", "Anthropic", AssetClass.PRE_IPO, "US", "pre_ipo", is_pre_ipo=True
     ),
+    # Chinese AI and memory names whose only tokenized exposure is pre-IPO. Listed
+    # here rather than under asia_tech because there is no cash quote to reference:
+    # the wrapper's price is the only price, so a basis check is unavailable and the
+    # anomaly detectors have to run on turnover alone.
+    UnderlyingSpec(
+        "KIMI", "Moonshot AI (Kimi)", AssetClass.PRE_IPO, "CN", "pre_ipo", None, True
+    ),
+    UnderlyingSpec(
+        "ZHIPU", "Zhipu AI", AssetClass.PRE_IPO, "CN", "pre_ipo", None, True
+    ),
+    UnderlyingSpec(
+        "MINIMAX", "MiniMax", AssetClass.PRE_IPO, "CN", "pre_ipo", None, True
+    ),
+    UnderlyingSpec(
+        "ENFLAME", "Enflame Technology", AssetClass.PRE_IPO, "CN", "pre_ipo", None, True
+    ),
+    UnderlyingSpec(
+        "CXMT",
+        "ChangXin Memory Technologies",
+        AssetClass.PRE_IPO,
+        "CN",
+        "pre_ipo",
+        None,
+        True,
+    ),
+    # --- read off the live venue listings ----------------------------------
+    *_equities("US", "ai_semis", _AI_SEMIS),
+    *_equities("US", "megacap_tech", _MEGACAP_TECH),
+    *_equities("US", "financials", _FINANCIALS),
+    *_equities("US", "healthcare", _HEALTHCARE),
+    *_equities("US", "energy_materials", _ENERGY_MATERIALS),
+    *_equities("US", "consumer_industrial", _CONSUMER_INDUSTRIAL),
+    *_equities("US", "space_defense", _SPACE_DEFENSE),
+    *_equities("US", "quantum", _QUANTUM),
+    *_equities("US", "nuclear_power", _NUCLEAR_POWER),
+    *_equities("US", "crypto_proxy", _CRYPTO_PROXY),
+    *_equities("US", None, _US_LISTED_FOREIGN),
+    *_equities("JP", "asia_tech", _JAPAN),
+    *_equities("KR", "asia_tech", _KOREA),
+    *_equities("HK", "asia_tech", _HONG_KONG),
+    *_equities("CN", "asia_tech", _MAINLAND_CHINA),
 )
 
 

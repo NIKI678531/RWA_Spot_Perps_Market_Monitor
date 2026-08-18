@@ -9,6 +9,13 @@ from typing import Any
 from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+#: How long a SQLite connection waits for a lock before raising. Sized against a
+#: collection pass, not a query: the hourly pass paces roughly 85 requests across
+#: CoinGecko and GeckoTerminal and holds its transaction for over ten minutes.
+#: Deployments use MySQL, where this does not apply; local development is the case
+#: that has to survive a scheduler and a dashboard on one file.
+SQLITE_BUSY_TIMEOUT_SECONDS = 900.0
+
 
 class Settings(BaseSettings):
     """Runtime configuration. Every field has a local-development default."""
@@ -32,8 +39,34 @@ class Settings(BaseSettings):
     alpaca_api_key_id: str = ""
     alpaca_api_secret_key: str = ""
     alpaca_base_url: str = "https://data.alpaca.markets"
+    #: Free accounts get IEX, a single venue carrying a few per cent of US equity
+    #: volume. Stored on every row rather than assumed, so a later upgrade to the
+    #: consolidated tape ("sip") is visible in the data instead of silently changing
+    #: what the series means halfway along.
+    alpaca_feed: str = "iex"
     loris_api_key: str = ""
     loris_base_url: str = "https://loris.tools"
+    #: The host the loris.tools front end actually calls. The public web pages render
+    #: their numbers client-side, so scraping the HTML yields venue names without any
+    #: volume or open interest; this API returns both and is the only usable route.
+    loris_api_base_url: str = "https://api.loris.tools"
+
+    # --- Cross-venue perpetual exchanges ----------------------------------
+    # Public market-data endpoints, no key. These reconstruct the cross-venue perp
+    # aggregation that the workbook took from the Loris public page, which is capped
+    # at a Top 25 with no history and whose API is key-gated.
+    okx_base_url: str = "https://www.okx.com"
+    bybit_base_url: str = "https://api.bybit.com"
+    gate_base_url: str = "https://api.gateio.ws"
+    mexc_futures_base_url: str = "https://contract.mexc.com"
+    bitget_base_url: str = "https://api.bitget.com"
+
+    # --- Issuer official sites --------------------------------------------
+    # Product breadth comes from the issuers themselves: their own counts exceed any
+    # aggregator's index, so these pages are the coverage denominator.
+    ondo_products_url: str = "https://ondo.finance/ondo-stocks"
+    xstocks_products_url: str = "https://xstocks.com/products"
+    xstocks_ecosystem_url: str = "https://xstocks.com/ecosystem"
 
     # --- Report delivery --------------------------------------------------
     # No PVC in production K8s: generated xlsx/docx go to object storage or the DB.
@@ -94,7 +127,17 @@ class Settings(BaseSettings):
 
     @property
     def sqlite_connect_args(self) -> dict[str, Any]:
-        return {"check_same_thread": False} if self.is_sqlite else {}
+        if not self.is_sqlite:
+            return {}
+        return {
+            "check_same_thread": False,
+            # A collection pass holds its write transaction across every HTTP call it
+            # makes, which for a rate-limited source is minutes. The default timeout
+            # is five seconds, so anything else touching the database in that window
+            # fails outright rather than waiting. Waiting is the right answer: a pass
+            # that starts a little late is a pass, and one that raises is a hole.
+            "timeout": SQLITE_BUSY_TIMEOUT_SECONDS,
+        }
 
 
 @lru_cache

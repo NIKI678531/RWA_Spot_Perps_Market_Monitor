@@ -17,7 +17,12 @@ import { AmountValue } from '@/components/AmountValue';
 import { EmptyState, ErrorState, TableSkeleton } from '@/components/states';
 import { useApi } from '@/hooks/useApi';
 import { useI18n } from '@/i18n';
-import { formatCount, formatTimestamp } from '@/utils/format';
+import {
+  formatCount,
+  formatMinutes,
+  formatPercent,
+  formatTimestamp,
+} from '@/utils/format';
 
 function StatusIcon({ status }: { status: string }) {
   if (status === 'ok') return <CheckCircle2 size={16} aria-hidden />;
@@ -139,6 +144,98 @@ export function DataQuality() {
               </span>
             </div>
           </div>
+
+          <section className="card stack-md">
+            <h2 className="section-title">{t('quality.coverage', '覆盖率')}</h2>
+            <p className="card__hint">
+              {t(
+                'quality.coverageNote',
+                '上一排数字回答「采到了多少」，这一排回答「这占市场的多少」。分母来自发行商自己公布的产品数，' +
+                  '不公布的发行商不按 0 计入，否则覆盖最差的时候比率反而最好看。',
+              )}
+            </p>
+            <div className="kpi-strip">
+              <div className="card kpi-card">
+                <span className="kpi-card__label">
+                  {t('quality.indexed', '已收录资产')}
+                </span>
+                <span className="kpi-card__value">
+                  {formatCount(quality.data?.catalogue.indexed_assets ?? null)}
+                </span>
+                <span className="kpi-card__scope">
+                  {t('quality.indexedNote', '仅在口径内的层级，NON_RWA 不计入')}
+                </span>
+              </div>
+              <div className="card kpi-card">
+                <Tooltip
+                  title={t(
+                    'quality.catalogueRatioHint',
+                    '发行商公布的产品数远大于任何聚合器收录的数量：xStocks 官方列出 700 余只，' +
+                      'CoinGecko 只收录约 113 只。用收录数当市场规模会严重低估。',
+                  )}
+                >
+                  <span className="kpi-card__label">
+                    {t('quality.catalogueRatio', '收录 / 官方公布')}
+                  </span>
+                </Tooltip>
+                <span className="kpi-card__value">
+                  {/* Null stays a dash. A ratio of 1.0 would claim we see everything
+                      anyone issues, which is a claim, not a default. */}
+                  {quality.data?.catalogue.ratio === null ||
+                  quality.data?.catalogue.ratio === undefined
+                    ? '—'
+                    : formatPercent(quality.data.catalogue.ratio)}
+                </span>
+                <span className="kpi-card__scope">
+                  {formatCount(quality.data?.catalogue.official_products ?? null)}{' '}
+                  {t('quality.officialProducts', '官方产品数')} ·{' '}
+                  {formatCount(quality.data?.catalogue.issuers_with_count ?? null)}/
+                  {formatCount(quality.data?.catalogue.issuer_count ?? null)}{' '}
+                  {t('quality.issuersReporting', '家发行商有公布')}
+                </span>
+              </div>
+              <div className="card kpi-card">
+                <span className="kpi-card__label">
+                  {t('quality.referenced', '有参考股价的标的')}
+                </span>
+                <span className="kpi-card__value">
+                  {formatCount(quality.data?.reference.priced_underlyings ?? null)}
+                  <span className="kpi-card__scope">
+                    {' / '}
+                    {formatCount(quality.data?.reference.tracked_underlyings ?? null)}
+                  </span>
+                </span>
+                <span className="kpi-card__scope">
+                  {quality.data?.reference.unavailable_reason ??
+                    t(
+                      'quality.referencedNote',
+                      '没有参考价的代币无法判断价格对不对，只能看成交',
+                    )}
+                </span>
+              </div>
+              <div className="card kpi-card">
+                <Tooltip
+                  title={t(
+                    'quality.referenceAgeHint',
+                    '取最旧的一条参考价：覆盖率只等于最陈旧的那一行，平均值会把一条三天前的报价藏在一堆当前报价里。' +
+                      '标的休市时数值大是正常的，不是采集失败。',
+                  )}
+                >
+                  <span className="kpi-card__label">
+                    {t('quality.referenceAge', '参考价最大延迟')}
+                  </span>
+                </Tooltip>
+                <span className="kpi-card__value">
+                  {formatMinutes(quality.data?.reference.max_age_minutes ?? null)}
+                </span>
+                <span className="kpi-card__scope">
+                  {quality.data?.reference.feed
+                    ? `${t('quality.feed', '数据源')}: ${quality.data.reference.feed}`
+                    : t('quality.noFeed', '尚未配置参考价数据源')}
+                </span>
+              </div>
+            </div>
+          </section>
 
           {(quality.data?.divergent_venues.length ?? 0) > 0 ? (
             <section className="card stack-sm">

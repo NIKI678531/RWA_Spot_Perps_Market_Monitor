@@ -43,6 +43,34 @@ class TestUnderlyingMap:
         pending = underlying_map.pending_review(results)
         assert [r.source_symbol for r in pending] == ["WEIRDCOIN"]
 
+    def test_a_lowercase_bstocks_symbol_resolves(self) -> None:
+        """CoinGecko lowercases every symbol, so ``aaplb`` is how Apple arrives.
+
+        This was live: only the uppercase B rule existed, so all 49 bStocks assets
+        failed to resolve, tiered NON_RWA, and left the spot volume KPI blank.
+        """
+        result = underlying_map.resolve("aaplb", KNOWN)
+
+        assert result.underlying_id == "AAPL"
+        assert result.status is MappingStatus.AUTO
+        assert result.rule == "strip_bstocks_lower_suffix"
+
+    def test_both_spellings_of_a_wrapper_reach_the_same_underlying(self) -> None:
+        """A source's capitalisation must not change which security it counts toward.
+
+        Otherwise the same company is two entities: TSLAB from a venue and tslab from
+        CoinGecko would rank separately and each look half its real size.
+        """
+        results = underlying_map.resolve_all(["TSLAB", "tslab"], KNOWN)
+        assert [r.underlying_id for r in results] == ["TSLA", "TSLA"]
+
+    def test_the_lowercase_rule_still_needs_a_seeded_security(self) -> None:
+        """One character is a wide suffix, and the underlying set is what narrows it.
+
+        ``arb`` is Arbitrum, not a wrapper around a security called AR.
+        """
+        assert underlying_map.resolve("arb", KNOWN).underlying_id is None
+
 
 class TestTiering:
     def test_a_custodied_wrapper_is_core_rwa(self) -> None:
