@@ -61,6 +61,8 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 app.db
+*.db-wal
+*.db-shm
 
 # Flask stuff:
 instance/
@@ -217,3 +219,30 @@ frontend/.cache/
 frontend/.webpack/
 frontend/*.tsbuildinfo
 secrets.yaml
+
+# Local Codex scratch files
+.codex_tmp/
+
+# Locally generated reports, presentations, and office lock files
+outputs/
+reports/
+~$*
+*.doc
+*.docx
+*.pdf
+*.ppt
+*.pptx
+*.xls
+*.xlsx
+
+# Local images and screenshots
+*.bmp
+*.gif
+*.ico
+*.jpeg
+*.jpg
+*.png
+*.svg
+*.tif
+*.tiff
+*.webp
