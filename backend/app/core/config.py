@@ -68,6 +68,15 @@ class Settings(BaseSettings):
     xstocks_products_url: str = "https://xstocks.com/products"
     xstocks_ecosystem_url: str = "https://xstocks.com/ecosystem"
 
+    # --- Sharing ----------------------------------------------------------
+    #: Signing key for read-only share links. Deliberately has no default: a
+    #: per-process random key would invalidate every link that has already been sent
+    #: at the next restart, and a shipped constant would let anyone mint a link. With
+    #: this unset, share links cannot be issued and the endpoint says so.
+    share_secret: str = ""
+    #: How long an issued share link stays valid when the caller names no expiry.
+    share_link_ttl_hours: int = 168
+
     # --- Report delivery --------------------------------------------------
     # No PVC in production K8s: generated xlsx/docx go to object storage or the DB.
     report_storage_backend: str = "database"
@@ -79,7 +88,10 @@ class Settings(BaseSettings):
     # --- Scheduling -------------------------------------------------------
     scheduler_enabled: bool = False
     scheduler_timezone: str = "Asia/Hong_Kong"
-    daily_report_cron: str = "0 8 * * *"
+    #: 17:15 HKT, fifteen minutes after the afternoon freeze. The workbook is built
+    #: from the frozen cut, so it must not run before there is one — a report that
+    #: disagrees with the edition it claims to summarise is worse than a late report.
+    daily_report_cron: str = "15 17 * * *"
 
     @field_validator("frontend_origins")
     @classmethod

@@ -1,0 +1,1732 @@
+/*
+ * R1 surfaces: the decision loop (detect → verify → explain → act → review).
+ *
+ * global.css owns the shell and the surfaces that predate R1; pages.css owns the
+ * four page templates. This file owns everything the R1 rebuild introduced — the
+ * status strip, the value-object marks, the alert queue and drawer, the readiness
+ * heatmap, the governance banners.
+ *
+ * Same rule as the rest: every colour, radius, duration and grouping gap is a token
+ * from tokens.css. Two idioms recur because DESIGN.md principle 2 asks for them, and
+ * because a page carrying nine kinds of state tag would otherwise turn into a
+ * colour-block quilt:
+ *
+ *   - semantic state is carried by a 3px rule or a dot, not by a filled panel;
+ *   - state fills that do exist (hover, selected) are translucent and laid *over*
+ *     the glass, so they never cover the thing being pointed at.
+ */
+
+/* ===== layout utilities ==================================================== */
+
+.stack-xs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+/*
+ * Two columns that carry different things — opportunity beside risk, volume treemap
+ * beside OI treemap. Equal width on purpose: an unequal split reads as a ranking, and
+ * in both of those pairs neither side outranks the other.
+ */
+.split-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--spacing-grid-gap);
+  align-items: start;
+}
+
+@media (max-width: 1024px) {
+  .split-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+}
+
+.card__head .card__title,
+.card__head .section-title {
+  margin: 0;
+}
+
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+/* ===== filter bar ========================================================== */
+
+/*
+ * Denser than a content card. It is read once on arrival and then only glanced at,
+ * so it gets less of the page than the answer below it.
+ */
+.card.filter-bar {
+  padding: var(--spacing-md);
+}
+
+.filter-bar .chip {
+  padding: 6px 12px;
+}
+
+.filter-group {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.filter-group__label {
+  min-width: 56px;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  color: var(--color-text-secondary);
+}
+
+/* A chip that states something rather than filtering by it. */
+.chip--static {
+  cursor: default;
+  color: var(--color-text-secondary);
+}
+
+.chip--static:hover {
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+/* ===== the value object's marks ============================================ */
+
+.metric--sm {
+  font-size: var(--text-body-sm-size);
+}
+
+.metric--md {
+  font-size: var(--text-numeric-size);
+}
+
+.metric--lg {
+  font-size: var(--text-h2-size);
+  font-weight: 600;
+}
+
+/*
+ * The qualifier that travels with a figure — `*` for partial, 「实测为零」for an
+ * observed zero, the age for a stale one. Set in the sans face at label size so it
+ * never lines up with the digits and gets read as part of the number.
+ */
+.metric__mark {
+  margin-left: var(--spacing-xs);
+  font-family: var(--font-sans);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-text-secondary);
+}
+
+.metric__mark--stale {
+  color: var(--color-warning);
+}
+
+.verify-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  white-space: nowrap;
+}
+
+.verify-tag--verified {
+  color: var(--color-success);
+}
+
+.verify-tag--partial {
+  color: var(--color-warning);
+}
+
+/*
+ * Stale is not a weaker verified and not a softer failure — it blocks new
+ * management-level conclusions while remaining a real observation. It gets a colour
+ * of its own so it cannot be skimmed as either of its neighbours.
+ */
+.verify-tag--stale {
+  color: var(--color-cat-marketing);
+}
+
+.verify-tag--not_verified {
+  color: var(--color-text-disabled);
+}
+
+.verify-tag--empty {
+  color: var(--color-text-secondary);
+}
+
+/*
+ * Confidence is a word inside an outline, never a filled badge: a filled badge in a
+ * card footer competes with the figure above it, and a score with a fill invites
+ * being read as a gate (rule 17).
+ */
+.confidence {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px 8px;
+  border: 1px solid currentcolor;
+  border-radius: var(--rounded-pill);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+}
+
+.confidence--high {
+  color: var(--color-success);
+}
+
+.confidence--medium {
+  color: var(--color-warning);
+}
+
+.confidence--low {
+  color: var(--color-text-secondary);
+}
+
+.confidence__detail {
+  font-family: var(--font-numeric);
+  font-weight: 400;
+  font-feature-settings: var(--text-numeric-feature);
+  color: var(--color-text-secondary);
+}
+
+/* ===== severity & state tags =============================================== */
+
+/*
+ * Severity is a dot and a word. It appears in table cells beside a headline, and a
+ * pill there would be the loudest thing in a row whose point is the headline.
+ */
+.sev {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  white-space: nowrap;
+}
+
+.sev::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border-radius: var(--rounded-pill);
+  background: currentcolor;
+}
+
+.sev--critical {
+  color: var(--color-error);
+}
+
+.sev--high {
+  color: var(--color-warning);
+}
+
+.sev--medium {
+  color: var(--color-info);
+}
+
+.sev--low {
+  color: var(--color-text-secondary);
+}
+
+/*
+ * One tag shape for every enumeration the product carries — alert state, gap status,
+ * edition status, candidate stage, RWA tier, coverage state. They are all "which of a
+ * fixed set is this one", so they read as one kind of thing and differ only in
+ * colour; a different shape per enumeration would suggest a difference in kind.
+ */
+.state-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 2px 8px;
+  border: 1px solid currentcolor;
+  border-radius: var(--rounded-pill);
+  background: transparent;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+
+/* alert lifecycle */
+.state-tag--detected {
+  color: var(--color-text-disabled);
+}
+
+.state-tag--tentative {
+  color: var(--color-warning);
+}
+
+.state-tag--published {
+  color: var(--color-info);
+}
+
+.state-tag--claimed {
+  color: var(--color-primary);
+}
+
+.state-tag--in_review {
+  color: var(--color-cat-marketing);
+}
+
+.state-tag--actioned {
+  color: var(--color-cat-trading);
+}
+
+.state-tag--resolved {
+  color: var(--color-success);
+}
+
+.state-tag--false_positive {
+  color: var(--color-error);
+}
+
+.state-tag--dismissed {
+  color: var(--color-text-secondary);
+}
+
+/* data gap status */
+.state-tag--open {
+  color: var(--color-warning);
+}
+
+.state-tag--assigned {
+  color: var(--color-primary);
+}
+
+.state-tag--fixed {
+  color: var(--color-info);
+}
+
+.state-tag--accepted {
+  color: var(--color-text-secondary);
+}
+
+/*
+ * `live` covers two enumerations: an edition that is still rolling, and a wrapper we
+ * already have in market. Both mean "current and active", which is what the colour
+ * says; what a live edition additionally means — that it cannot be cited — is carried
+ * by the words beside it and by the disabled share control, not by a shade.
+ */
+.state-tag--live {
+  color: var(--color-success);
+}
+
+.state-tag--frozen {
+  color: var(--color-primary);
+}
+
+.state-tag--superseded {
+  color: var(--color-text-secondary);
+}
+
+.state-tag--failed {
+  color: var(--color-error);
+}
+
+/* issuance candidate stage */
+.state-tag--watch {
+  color: var(--color-text-secondary);
+}
+
+.state-tag--screening {
+  color: var(--color-info);
+}
+
+.state-tag--feasibility {
+  color: var(--color-cat-marketing);
+}
+
+.state-tag--proposal {
+  color: var(--color-primary);
+}
+
+.state-tag--approved {
+  color: var(--color-success);
+}
+
+.state-tag--declined {
+  color: var(--color-error);
+}
+
+.state-tag--parked {
+  color: var(--color-text-disabled);
+}
+
+/* rwa tier — NON_RWA is deliberately the quietest thing on any row it appears in */
+.state-tag--core_rwa {
+  color: var(--color-primary);
+}
+
+.state-tag--rwa_adjacent {
+  color: var(--color-cat-data);
+}
+
+.state-tag--synthetic {
+  color: var(--color-cat-marketing);
+}
+
+.state-tag--non_rwa {
+  color: var(--color-text-disabled);
+}
+
+/* coverage state */
+.state-tag--planned {
+  color: var(--color-info);
+}
+
+.state-tag--gap {
+  color: var(--color-warning);
+}
+
+.state-tag--not_applicable {
+  color: var(--color-text-disabled);
+}
+
+/* cross-cutting conditions */
+.state-tag--overdue,
+.state-tag--blocking {
+  color: var(--color-error);
+}
+
+.state-tag--stale,
+.state-tag--weakest {
+  color: var(--color-warning);
+}
+
+/* ===== governance banner =================================================== */
+
+/*
+ * A publication-gate verdict, stated once at the top of the page. It is a 3px rule and
+ * an icon rather than a tinted block, for the same reason `.alert-item` is: a filled
+ * red panel makes the whole page feel like the alarm, and this banner also has to be
+ * able to say "nothing is blocked" without looking like a celebration.
+ */
+.banner {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: var(--spacing-md);
+  padding: var(--spacing-md) var(--spacing-md) var(--spacing-md) var(--spacing-lg);
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+  backdrop-filter: blur(8px);
+}
+
+.banner::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: var(--spacing-sm);
+  bottom: var(--spacing-sm);
+  width: 3px;
+  border-radius: var(--rounded-pill);
+  background: var(--color-text-disabled);
+}
+
+.banner > svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.banner--blocked::before {
+  background: var(--color-error);
+}
+
+.banner--blocked > svg {
+  color: var(--color-error);
+}
+
+.banner--clear::before {
+  background: var(--color-success);
+}
+
+.banner--clear > svg {
+  color: var(--color-success);
+}
+
+.banner .chip {
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+
+/* ===== queue summary ======================================================= */
+
+.queue-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.queue-summary__cell {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-md);
+  border: 0;
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+  backdrop-filter: blur(8px);
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--dur-base) var(--ease-emphasized),
+    box-shadow var(--dur-base) var(--ease-emphasized);
+}
+
+.queue-summary__cell:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-2);
+}
+
+.queue-summary__cell:active {
+  transform: scale(0.97);
+}
+
+.queue-summary__cell:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.queue-summary__value {
+  font-size: var(--text-h1-size);
+  font-weight: 600;
+}
+
+.queue-summary__label {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+/* The count is what changes tone, not the cell — the cell is still just a filter. */
+.queue-summary__cell--attention .queue-summary__value {
+  color: var(--color-warning);
+}
+
+.queue-summary__cell--danger .queue-summary__value {
+  color: var(--color-error);
+}
+
+/* ===== alert queue list ==================================================== */
+
+.alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.alert-list__row {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 0;
+  border-radius: var(--rounded-lg);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-standard);
+}
+
+.alert-list__row:hover {
+  background: var(--color-primary-container);
+}
+
+.alert-list__row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.alert-list__marks {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+.alert-list__headline {
+  font-size: var(--text-body-md-size);
+  color: var(--color-text);
+}
+
+.alert-list__meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  flex-wrap: wrap;
+  font-size: var(--text-label-sm-size);
+  color: var(--color-text-secondary);
+}
+
+/* ===== decision home ======================================================= */
+
+/*
+ * The one-sentence answer. It is a heading with no card around it because it is the
+ * page's own voice rather than one panel among several — DESIGN.md principle 7, the
+ * dashboard that opens on a sentence.
+ */
+.home-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding-bottom: var(--spacing-sm);
+}
+
+.home-summary__fact {
+  margin: 0;
+  font-size: var(--text-display-hero-size);
+  font-weight: var(--text-display-hero-weight);
+  line-height: var(--text-display-hero-line);
+  letter-spacing: var(--text-display-hero-tracking);
+}
+
+.home-summary__meaning {
+  margin: 0;
+  max-width: 72ch;
+  font-size: var(--text-body-lg-size);
+  line-height: var(--text-body-line);
+  color: var(--color-text-secondary);
+}
+
+.home-summary__foot {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  flex-wrap: wrap;
+  padding-top: var(--spacing-xs);
+}
+
+.question-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: var(--spacing-grid-gap);
+  align-items: stretch;
+}
+
+.question-card__question {
+  margin: 0;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  color: var(--color-text-secondary);
+}
+
+.question-card__answer {
+  margin: 0;
+  font-size: var(--text-h3-size);
+  font-weight: var(--text-h3-weight);
+  line-height: var(--text-h3-line);
+}
+
+.question-card__value {
+  display: flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+}
+
+/*
+ * "This question cannot be answered this cycle" is an answer, and it is styled as one
+ * rather than as an error: the card keeps its place in the grid and states why.
+ */
+.question-card__unavailable {
+  margin: 0;
+  font-size: var(--text-body-sm-size);
+  color: var(--color-warning);
+}
+
+/* Pushes the CTA row to the bottom so four cards of unequal length still line up. */
+.question-card__foot {
+  margin-top: auto;
+  padding-top: var(--spacing-xs);
+}
+
+.highlight .section-title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+}
+
+.highlight--opportunity .section-title > svg {
+  color: var(--color-success);
+}
+
+.highlight--risk .section-title > svg {
+  color: var(--color-warning);
+}
+
+.highlight__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.highlight__item {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-left: var(--spacing-md);
+}
+
+.highlight__item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: var(--rounded-pill);
+  background: var(--color-text-disabled);
+}
+
+.highlight--opportunity .highlight__item::before {
+  background: var(--color-success);
+}
+
+.highlight--risk .highlight__item::before {
+  background: var(--color-warning);
+}
+
+.highlight__title {
+  font-weight: var(--text-label-weight);
+}
+
+.highlight__detail {
+  margin: 0;
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+/* ===== KPI band ============================================================ */
+
+/*
+ * Five scopes in one strip, with a dashed rule between the spot group and the perp
+ * group. The rule is the page's statement that the two sides do not add up, placed
+ * where a reader would otherwise try to add them; there is no total cell for a sum to
+ * go in, by construction.
+ */
+.kpi-band {
+  display: flex;
+  align-items: stretch;
+  gap: var(--spacing-lg);
+  overflow-x: auto;
+  padding-bottom: var(--spacing-xs);
+}
+
+.kpi-band__divider {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 0;
+  min-height: var(--spacing-lg);
+  border-left: 1px dashed var(--color-border-strong);
+}
+
+.kpi-cell {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  min-width: 180px;
+  padding: var(--spacing-sm);
+  border: 0;
+  border-radius: var(--rounded-lg);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-standard);
+}
+
+.kpi-cell:hover:not(:disabled) {
+  background: var(--color-primary-container);
+}
+
+.kpi-cell:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.kpi-cell:disabled {
+  cursor: default;
+}
+
+.kpi-cell__label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+/* Stock or flow, said out loud beside every figure — the two never share an axis. */
+.kpi-cell__dimension {
+  padding: 2px 8px;
+  border-radius: var(--rounded-pill);
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+}
+
+/* ===== drill-down cards ==================================================== */
+
+.drill-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: var(--spacing-md);
+}
+
+.drill-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding: var(--spacing-md);
+  padding-right: var(--spacing-xl);
+  border: 0;
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform var(--dur-base) var(--ease-emphasized),
+    box-shadow var(--dur-base) var(--ease-emphasized);
+}
+
+.drill-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--elevation-2);
+}
+
+.drill-card:active {
+  transform: scale(0.97);
+}
+
+.drill-card:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.drill-card > svg {
+  position: absolute;
+  top: var(--spacing-md);
+  right: var(--spacing-md);
+  color: var(--color-text-disabled);
+}
+
+.drill-card__label {
+  font-weight: var(--text-label-weight);
+}
+
+.drill-card__detail {
+  font-size: var(--text-body-sm-size);
+  color: var(--color-text-secondary);
+}
+
+/* ===== evidence & counter-evidence ========================================= */
+
+.evidence-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.evidence-list > li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  font-size: var(--text-body-sm-size);
+}
+
+.evidence-list__label {
+  color: var(--color-text-secondary);
+}
+
+.evidence-list__value {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.evidence-list__detail {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-text-disabled);
+}
+
+/*
+ * Counter-evidence sits at the same visual weight as the evidence above it, never
+ * behind a disclosure (rule 18). The amber rule is enough to mark it as the other
+ * side of the argument without demoting it to a footnote.
+ */
+.counter-evidence {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  padding-left: var(--spacing-md);
+}
+
+.counter-evidence::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 2px;
+  bottom: 2px;
+  width: 3px;
+  border-radius: var(--rounded-pill);
+  background: var(--color-warning);
+}
+
+.counter-evidence__title {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin: 0;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  color: var(--color-warning);
+}
+
+.counter-evidence__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-body-sm-size);
+}
+
+.counter-evidence__label {
+  color: var(--color-text);
+}
+
+.counter-evidence__detail {
+  margin-left: var(--spacing-xs);
+  color: var(--color-text-secondary);
+}
+
+/*
+ * One stored evidence row, read back in the detector family's own vocabulary. It is a
+ * surface of its own inside the drawer because each card is a separate claim with a
+ * separate version stamp, and they must not run together.
+ */
+.evidence-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+}
+
+.evidence-card__rule {
+  font-weight: var(--text-label-weight);
+}
+
+.evidence-card__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: var(--spacing-sm);
+  margin: 0;
+}
+
+.evidence-card__grid dt {
+  margin: 0;
+  font-size: var(--text-label-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.evidence-card__grid dd {
+  margin: 0;
+}
+
+/* ===== drawer & action forms =============================================== */
+
+.drawer__title {
+  font-size: var(--text-h3-size);
+  font-weight: var(--text-h3-weight);
+  line-height: var(--text-h3-line);
+}
+
+.drawer__claim {
+  margin: 0;
+  font-size: var(--text-body-lg-size);
+  line-height: var(--text-body-line);
+}
+
+/*
+ * The form only appears once an action is chosen, and it is a distinct surface: what
+ * is typed here becomes an audit record with the operator's name on it, so it should
+ * not look like an inline edit of the page behind it.
+ */
+.action-form {
+  padding: var(--spacing-md);
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.field__label {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  color: var(--color-text-secondary);
+}
+
+.field__input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--rounded-md);
+  background: var(--color-surface-strong);
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-body-md-size);
+  transition:
+    border-color var(--dur-micro) var(--ease-standard),
+    box-shadow var(--dur-micro) var(--ease-standard);
+}
+
+.field__input:focus {
+  outline: none;
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+textarea.field__input {
+  resize: vertical;
+  line-height: var(--text-body-line);
+}
+
+.form-error {
+  margin: 0;
+  font-size: var(--text-body-sm-size);
+  color: var(--color-error);
+}
+
+.button-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--rounded-pill);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font: inherit;
+  font-size: var(--text-label-md-size);
+  font-weight: var(--text-label-weight);
+  line-height: var(--text-label-line);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-micro) var(--ease-standard),
+    transform var(--dur-micro) var(--ease-standard);
+}
+
+.button-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.button-primary:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.button-primary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.button-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.link-button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  padding: 0;
+  border: 0;
+  border-radius: var(--rounded-sm);
+  background: transparent;
+  color: var(--color-primary);
+  font: inherit;
+  font-size: var(--text-body-sm-size);
+  cursor: pointer;
+  transition: color var(--dur-micro) var(--ease-standard);
+}
+
+.link-button:hover:not(:disabled) {
+  color: var(--color-primary-hover);
+  text-decoration: underline;
+}
+
+.link-button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.link-button:disabled {
+  color: var(--color-text-disabled);
+  cursor: not-allowed;
+}
+
+/* ===== timeline (the audit record, read back) ============================== */
+
+.timeline {
+  position: relative;
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 var(--spacing-md);
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-md);
+}
+
+.timeline::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 6px;
+  bottom: 6px;
+  width: 1px;
+  background: var(--color-border);
+}
+
+.timeline__row {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.timeline__row::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--spacing-md) * -1);
+  top: 6px;
+  width: 7px;
+  height: 7px;
+  border-radius: var(--rounded-pill);
+  background: var(--color-primary);
+}
+
+.timeline__time {
+  font-family: var(--font-numeric);
+  font-size: var(--text-label-sm-size);
+  font-feature-settings: var(--text-numeric-feature);
+  color: var(--color-text-disabled);
+}
+
+.timeline__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: var(--text-body-sm-size);
+}
+
+.timeline__transition {
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-primary);
+}
+
+.timeline__note {
+  color: var(--color-text-secondary);
+  white-space: pre-wrap;
+}
+
+/* ===== readiness heatmap =================================================== */
+
+/*
+ * Columns are independently normalised states, so there is no total column and no
+ * row score (rule 17). The grid template comes from the page as an inline style
+ * because the number of dimensions is server-defined; the rows inherit it so each
+ * row can still carry its own hover and selected state, which `display: contents`
+ * would have thrown away.
+ */
+.heatmap {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+  overflow-x: auto;
+}
+
+.heatmap__head,
+.heatmap__row {
+  display: grid;
+  grid-template-columns: inherit;
+  align-items: center;
+  gap: var(--spacing-sm);
+  min-width: 100%;
+  width: max-content;
+  padding: var(--spacing-sm);
+  border-radius: var(--rounded-lg);
+}
+
+.heatmap__head {
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-text-secondary);
+}
+
+.heatmap__col {
+  cursor: help;
+}
+
+.heatmap__row {
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-standard);
+}
+
+.heatmap__row:hover,
+.heatmap__row--selected {
+  background: var(--color-primary-container);
+}
+
+.heatmap__row:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.heatmap__name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.heatmap__weakest {
+  display: flex;
+  justify-content: flex-end;
+}
+
+/*
+ * The shade is an alpha over the glass, driven by the `--heat` custom property the
+ * cell sets from its normalised value. Opacity rather than a second colour token:
+ * DATAVIZ.md may not introduce colour values, and a heat ramp built from one token is
+ * also the ramp that survives dark mode unchanged.
+ */
+.heat-cell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-xs);
+  min-height: 32px;
+  padding: var(--spacing-xs) var(--spacing-sm);
+  border-radius: var(--rounded-sm);
+  overflow: hidden;
+}
+
+.heat-cell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--color-primary);
+  opacity: calc(var(--heat, 0) * 0.22);
+}
+
+.heat-cell > * {
+  position: relative;
+}
+
+/*
+ * Not assessed is not a low score, so it must not land anywhere on the ramp. It gets
+ * the same hatch the value object uses for 未验证 — the shared reading being "there
+ * is no number here", which is a different statement from "the number is small".
+ */
+.heat-cell--unassessed {
+  color: var(--color-text-disabled);
+  font-size: var(--text-label-sm-size);
+  background-image: repeating-linear-gradient(
+    45deg,
+    var(--color-border) 0,
+    var(--color-border) 4px,
+    transparent 4px,
+    transparent 8px
+  );
+}
+
+.heat-cell--weakest {
+  box-shadow: inset 0 0 0 1px var(--color-warning);
+}
+
+.heat-cell__mark {
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-warning);
+}
+
+/* ===== editions: payload, diff, share ====================================== */
+
+.data-table-toggle > summary {
+  cursor: pointer;
+  color: var(--color-primary);
+  font-size: var(--text-body-sm-size);
+}
+
+.data-table-toggle > summary:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: var(--rounded-sm);
+}
+
+.payload-json {
+  margin: var(--spacing-sm) 0 0;
+  max-height: 360px;
+  overflow: auto;
+  padding: var(--spacing-md);
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+  font-family: var(--font-numeric);
+  font-size: var(--text-label-sm-size);
+  line-height: var(--text-body-line);
+  color: var(--color-text-secondary);
+}
+
+/*
+ * A revision's field-level diff. Both value columns are set in the numeric face even
+ * when a value is textual, so that a changed figure lines up above the one it
+ * replaced — the comparison is the entire reason the row is on screen.
+ */
+.diff-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--text-body-sm-size);
+}
+
+.diff-table th {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  text-align: left;
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-text-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.diff-table td {
+  padding: var(--spacing-xs) var(--spacing-sm);
+  vertical-align: top;
+}
+
+.diff-table td + td {
+  font-family: var(--font-numeric);
+  font-feature-settings: var(--text-numeric-feature);
+}
+
+.diff-table td + td + td {
+  color: var(--color-primary);
+}
+
+.share-link {
+  display: block;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border-radius: var(--rounded-md);
+  background: var(--color-surface-strong);
+  font-family: var(--font-numeric);
+  font-size: var(--text-label-sm-size);
+  word-break: break-all;
+  user-select: all;
+}
+
+/* ===== status strip ======================================================== */
+
+/*
+ * Sticky under the top bar, never conditionally hidden. Its whole job is that "when
+ * is this from, and can I trust it" stays answerable in a screenshot someone pastes
+ * into a deck six weeks later.
+ */
+.statusbar {
+  position: sticky;
+  top: var(--topbar-height);
+  z-index: calc(var(--z-content) + 1);
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  flex-wrap: wrap;
+  min-height: 28px;
+  padding: var(--spacing-xs) var(--spacing-page-x);
+  background: var(--color-background-overlay);
+  backdrop-filter: blur(12px);
+  font-size: var(--text-label-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.statusbar__item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+}
+
+.statusbar__item--warn {
+  color: var(--color-warning);
+}
+
+.statusbar__item--muted {
+  color: var(--color-text-disabled);
+}
+
+.statusbar__sep {
+  width: 1px;
+  height: 12px;
+  background: var(--color-border);
+}
+
+.statusbar__blocked {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  margin-left: auto;
+  font-weight: var(--text-label-weight);
+  color: var(--color-error);
+}
+
+.statusbar--pending {
+  display: flex;
+  align-items: center;
+}
+
+/* ===== top bar: search, identity, edition =================================== */
+
+.topsearch {
+  position: relative;
+  flex: 1 1 auto;
+  max-width: 420px;
+}
+
+.topsearch__field {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  height: 36px;
+  padding: 0 var(--spacing-sm) 0 var(--spacing-md);
+  border: 1px solid transparent;
+  border-radius: var(--rounded-pill);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  transition:
+    border-color var(--dur-micro) var(--ease-standard),
+    box-shadow var(--dur-micro) var(--ease-standard);
+}
+
+.topsearch__field:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.topsearch__field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-body-sm-size);
+}
+
+.topsearch__field input::-webkit-search-cancel-button {
+  display: none;
+}
+
+.topsearch__clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: var(--rounded-pill);
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.topsearch__clear:hover {
+  color: var(--color-primary);
+}
+
+.topsearch__clear:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.topsearch__panel,
+.identity__panel,
+.edition-picker__panel {
+  position: absolute;
+  top: calc(100% + var(--spacing-sm));
+  z-index: var(--z-dropdown);
+  padding: var(--spacing-sm);
+  border-radius: var(--rounded-xl);
+  background: var(--color-surface-strong);
+  backdrop-filter: blur(16px);
+  box-shadow: var(--elevation-3);
+  animation: pop-in var(--dur-fast) var(--ease-emphasized) both;
+}
+
+.topsearch__panel {
+  left: 0;
+  right: 0;
+  max-height: 420px;
+  overflow-y: auto;
+}
+
+.topsearch__empty {
+  margin: 0;
+  padding: var(--spacing-sm) var(--spacing-md);
+  color: var(--color-text-secondary);
+  font-size: var(--text-body-sm-size);
+}
+
+.topsearch__group + .topsearch__group {
+  margin-top: var(--spacing-sm);
+}
+
+.topsearch__group-label {
+  margin: 0 0 var(--spacing-xs);
+  padding: 0 var(--spacing-sm);
+  font-size: var(--text-label-sm-size);
+  font-weight: var(--text-label-weight);
+  color: var(--color-text-disabled);
+}
+
+.topsearch__hit {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--spacing-sm);
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 0;
+  border-radius: var(--rounded-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-standard);
+}
+
+.topsearch__hit--active,
+.topsearch__hit:focus-visible {
+  outline: none;
+  background: var(--color-primary-container);
+}
+
+.topsearch__hit-name {
+  font-size: var(--text-body-sm-size);
+}
+
+.topsearch__hit-detail {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-text-secondary);
+}
+
+.identity,
+.edition-picker {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.identity__panel,
+.edition-picker__panel {
+  right: 0;
+  width: 300px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-sm);
+}
+
+.edition-picker__panel {
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.edition-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: var(--spacing-sm) var(--spacing-md);
+  border: 0;
+  border-radius: var(--rounded-md);
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-standard);
+}
+
+.edition-option:hover,
+.edition-option:focus-visible {
+  outline: none;
+  background: var(--color-primary-container);
+}
+
+.edition-option--active {
+  background: var(--color-primary-container);
+  color: var(--color-primary);
+}
+
+.edition-option__name {
+  font-size: var(--text-body-sm-size);
+  font-weight: var(--text-label-weight);
+}
+
+.edition-option__detail {
+  font-size: var(--text-label-sm-size);
+  color: var(--color-text-secondary);
+}
+
+/* ===== search page ========================================================= */
+
+.search-form {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 10px var(--spacing-md);
+  border: 1px solid transparent;
+  border-radius: var(--rounded-lg);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+}
+
+.search-form:focus-within {
+  border-color: var(--color-primary);
+  box-shadow: var(--focus-ring);
+}
+
+.search-form input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--color-text);
+  font: inherit;
+  font-size: var(--text-body-lg-size);
+}
+
+/* ===== spinner ============================================================= */
+
+/*
+ * The only spinner in the app, and it is never a page-level loader — skeletons do
+ * that (DESIGN.md). This one marks a button that is mid-submit, where the shape of
+ * what is coming is already on screen.
+ */
+.spin {
+  animation: spin var(--dur-scroll) linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* ===== antd table state fills ============================================== */
+
+/*
+ * antd's default row hover and selection fills are derived from black, which under a
+ * glass surface reads as a smudge rather than as a highlight. Every fill in this app
+ * is translucent and laid over the glass, so these follow the same rule.
+ */
+.ant-table-wrapper .ant-table-tbody > tr.ant-table-row:hover > td,
+.ant-table-wrapper .ant-table-tbody > tr > td.ant-table-cell-row-hover {
+  background: var(--color-primary-container);
+}
+
+.ant-table-wrapper .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: var(--color-primary-container);
+}
+
+/* A blocking data gap, marked on the row rather than by tinting the whole table. */
+.ant-table-wrapper .ant-table-tbody > tr.row--blocking > td:first-child {
+  box-shadow: inset 3px 0 0 0 var(--color-error);
+}
+
+/* ===== responsive ========================================================== */
+
+@media (max-width: 1024px) {
+  .statusbar {
+    padding: var(--spacing-xs) var(--spacing-lg);
+  }
+
+  .topsearch {
+    max-width: 260px;
+  }
+}
+
+@media (max-width: 768px) {
+  .statusbar {
+    position: static;
+  }
+
+  .home-summary__fact {
+    font-size: var(--text-h1-size);
+  }
+
+  .split-2 {
+    grid-template-columns: 1fr;
+  }
+
+  .topsearch {
+    max-width: none;
+  }
+}

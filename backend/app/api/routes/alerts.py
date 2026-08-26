@@ -43,7 +43,10 @@ def alerts(
     include_resolved: bool = Query(default=False),
     limit: Limit = 100,
 ) -> AlertList:
-    stmt = select(Alert)
+    # Detection is not publication. A finding that has not cleared the gate in
+    # ``services/anomaly/publication.py`` has no ``published_at`` and is invisible on
+    # every surface, including this one.
+    stmt = select(Alert).where(Alert.published_at.isnot(None))
     if severity is not None:
         stmt = stmt.where(Alert.severity == severity)
     if family is not None:
@@ -78,7 +81,10 @@ def alerts(
 @router.get("/alerts/{alert_id}", response_model=AlertDetail)
 def alert_detail(alert_id: int, session: SessionDep) -> AlertDetail:
     alert = session.get(Alert, alert_id)
-    if alert is None:
+    if alert is None or alert.published_at is None:
+        # An unpublished finding returns 404 rather than 403: it exists, but saying
+        # so would leak that a detector fired on an entity we have published nothing
+        # about.
         raise HTTPException(status_code=404, detail=f"unknown alert {alert_id}")
 
     stmt = (

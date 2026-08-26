@@ -11,9 +11,9 @@
 import { Tooltip } from 'antd';
 
 import type { Amount } from '@/api/types';
-import { scopeLabel } from '@/api/types';
 import { formatUsd } from '@/utils/format';
 import { useI18n } from '@/i18n';
+import { useLabels } from '@/i18n/labels';
 
 export interface AmountValueProps {
   amount: Amount | null | undefined;
@@ -23,7 +23,8 @@ export interface AmountValueProps {
 }
 
 export function AmountValue({ amount, showScope = true, className }: AmountValueProps) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
+  const label = useLabels();
 
   if (!amount || amount.coverage === 'not_verified' || amount.value === null) {
     return (
@@ -35,7 +36,7 @@ export function AmountValue({ amount, showScope = true, className }: AmountValue
     );
   }
 
-  const scope = scopeLabel(amount.scope, locale);
+  const scope = label.scope(amount.scope);
   const body = (
     <span
       className={[

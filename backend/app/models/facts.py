@@ -291,3 +291,49 @@ class FactCategorySnapshot(Base, _SnapshotMixin):
     #: ETF, Ondo, xStocks, bStocks) and True only for the deduplicated union row.
     #: The API and every chart must respect it.
     is_additive: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+
+class FactLaunchWindowSnapshot(Base, _SnapshotMixin):
+    """How a newly listed product performed in its first hours.
+
+    Home page Q3 — "how are new products doing" — cannot be answered from the hourly
+    series. A listing at 14:20 has no 24h figure until the next day, and by the time
+    it does, the launch is over. So the three windows are measured from the listing
+    moment rather than from the top of an hour, and closed once measured.
+
+    Grain: asset x window x listing. Once ``closed_at`` is set the row is final; a
+    later correction appends a new snapshot with a later ``snapshot_ts``, as
+    everywhere else in this module.
+    """
+
+    __tablename__ = "fact_launch_window_snapshot"
+
+    asset_id: Mapped[str] = mapped_column(
+        ForeignKey("dim_asset.asset_id"), primary_key=True
+    )
+    #: ``1h`` | ``6h`` | ``24h``, measured from ``listed_at``.
+    window: Mapped[str] = mapped_column(String(8), primary_key=True)
+    snapshot_ts: Mapped[datetime] = snapshot_pk_column()
+
+    #: When the wrapper first appeared in any source. The window's origin.
+    listed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    #: Set when the window elapsed and the figures below stopped moving.
+    closed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    #: SPOT_VOLUME over the window. Raw and quality-adjusted side by side, as
+    #: everywhere: a launch that is entirely wash trades has a large raw figure.
+    raw_volume: Mapped[Decimal | None] = money_column()
+    adjusted_volume: Mapped[Decimal | None] = money_column()
+    #: SPOT_MARKET_CAP at window close — a stock figure, never added to the above.
+    market_cap: Mapped[Decimal | None] = money_column()
+    #: DEX_LIQUIDITY at window close. A launch with volume and no depth is a
+    #: different event from one with both.
+    liquidity_usd: Mapped[Decimal | None] = money_column()
+    trade_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    #: How many venues had listed it by window close. One venue is a listing; five
+    #: is demand.
+    venue_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

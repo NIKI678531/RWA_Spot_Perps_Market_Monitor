@@ -14,9 +14,8 @@ import ReactECharts from 'echarts-for-react';
 import type { EChartsOption } from 'echarts';
 
 import type { MetricScope, TimeseriesPoint } from '@/api/types';
-import { SESSION_LABEL } from '@/api/types';
 import { useI18n } from '@/i18n';
-import { axisTitle } from './guards';
+import { useLabels } from '@/i18n/labels';
 import {
   baseOption,
   categoricalPalette,
@@ -33,7 +32,8 @@ export interface TrendLineProps {
 }
 
 export function TrendLine({ points, scope, name, height = 320 }: TrendLineProps) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
+  const label = useLabels();
 
   const option = useMemo<EChartsOption>(() => {
     const palette = categoricalPalette();
@@ -55,9 +55,9 @@ export function TrendLine({ points, scope, name, height = 320 }: TrendLineProps)
               : usdAxisFormatter(Number(point.value));
           return [
             `<strong>${formatTimestamp(point.snapshot_ts)}</strong>`,
-            axisTitle(scope, locale),
+            label.scope(scope),
             `${name}: ${value}`,
-            t(`session.${point.market_session}`, SESSION_LABEL[point.market_session]),
+            label.session(point.market_session),
             point.is_carried_forward
               ? t('chart.carriedForward', '（沿用上一快照，本次未采集到新值）')
               : '',
@@ -77,7 +77,7 @@ export function TrendLine({ points, scope, name, height = 320 }: TrendLineProps)
       yAxis: {
         ...(baseOption().yAxis as object),
         type: 'value',
-        name: axisTitle(scope, locale),
+        name: label.scope(scope),
         axisLabel: { formatter: usdAxisFormatter, fontSize: 12 },
         // A money axis may be truncated as long as it is labelled; a bar chart's
         // may not, because the bar's length is the value.
@@ -103,7 +103,7 @@ export function TrendLine({ points, scope, name, height = 320 }: TrendLineProps)
         },
       ],
     } as EChartsOption;
-  }, [points, scope, name, t, locale]);
+  }, [points, scope, name, t, label]);
 
   return (
     <ReactECharts

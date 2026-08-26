@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import InstrumentedAttribute, Session
 
 from app.core.metrics import MetricScope, ScopedValue, safe_sum
+from app.db.base import as_utc
 from app.models.alerts import Alert, AlertEvidence
 from app.models.dimensions import (
     DimAsset,
@@ -337,9 +338,13 @@ def _load_alerts(session: Session) -> tuple[Alert, ...]:
     """Open alerts, worst first. Resolved ones are history, not a to-do list."""
     # Both MySQL and SQLite sort NULLs last under DESC, which is what we want: an
     # unscored alert belongs below the scored ones, not above them.
+    # Published only. A detector output that has not cleared the publication gate is
+    # not a finding anyone should see, and this dataset feeds both the dashboard and
+    # the workbook.
     stmt = (
         select(Alert)
         .where(Alert.resolved_ts.is_(None))
+        .where(Alert.published_at.isnot(None))
         .order_by(Alert.score.desc(), Alert.last_seen_ts.desc())
     )
     return tuple(session.execute(stmt).scalars().all())
@@ -350,6 +355,7 @@ def _load_evidence(session: Session) -> tuple[AlertEvidence, ...]:
         select(AlertEvidence)
         .join(Alert, AlertEvidence.alert_id == Alert.id)
         .where(Alert.resolved_ts.is_(None))
+        .where(Alert.published_at.isnot(None))
         .order_by(AlertEvidence.alert_id, AlertEvidence.snapshot_ts.desc())
     )
     return tuple(session.execute(stmt).scalars().all())
@@ -414,13 +420,13 @@ def age_minutes(observed_ts: datetime | None, as_of: datetime) -> int | None:
     collect, so a basis quoted without the gap reads every weekend as a mispricing.
     The API and the workbook must therefore age it identically.
 
-    Compared naive on purpose. SQLite and MySQL both store ``DATETIME`` without an
-    offset, so one side of this subtraction comes back tz-aware and the other does
-    not; normalising here beats raising in the middle of a request.
+    Both sides go through :func:`as_utc` first. SQLite and MySQL both store
+    ``DATETIME`` without an offset, so one side of this subtraction comes back
+    tz-aware and the other does not, and subtracting them raises mid-request.
     """
     if observed_ts is None:
         return None
-    delta = as_of.replace(tzinfo=None) - observed_ts.replace(tzinfo=None)
+    delta = as_utc(as_of) - as_utc(observed_ts)
     return max(0, int(delta.total_seconds() // 60))
 
 

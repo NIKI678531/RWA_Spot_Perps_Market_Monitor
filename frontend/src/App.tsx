@@ -5,6 +5,11 @@
  * `dark-mode` body class that CSS reads, and antd's algorithm, which cannot read CSS.
  * The class is applied in a layout effect and the antd tokens are re-read in the same
  * pass, so both change in the same frame and the theme never flashes.
+ *
+ * The route table is the product surface. Paths are the ones the backend already
+ * emits in `href` fields (`api/naming.py`), not a parallel invention — an alert, a
+ * digest and a search hit all have to land on the same screen. The two pre-R1 paths
+ * that were renamed keep redirects, because links to them exist in people's notes.
  */
 
 import { useCallback, useLayoutEffect, useMemo, useState } from 'react';
@@ -16,13 +21,19 @@ import zhCN from 'antd/locale/zh_CN';
 import zhTW from 'antd/locale/zh_TW';
 
 import { AppShell } from '@/components/AppShell';
+import { StatusBarProvider } from '@/components/StatusBar';
 import { I18nProvider, useI18n, type Locale } from '@/i18n';
-import { Alerts } from '@/pages/Alerts';
+import { AnomalyRadar } from '@/pages/AnomalyRadar';
+import { Candidates } from '@/pages/Candidates';
 import { DataQuality } from '@/pages/DataQuality';
-import { Overview } from '@/pages/Overview';
+import { DecisionHome } from '@/pages/DecisionHome';
 import { Perps } from '@/pages/Perps';
 import { Reports } from '@/pages/Reports';
+import { SearchPage } from '@/pages/SearchPage';
 import { SpotScale } from '@/pages/SpotScale';
+import { ThemeDemand } from '@/pages/ThemeDemand';
+import { Underlying360 } from '@/pages/Underlying360';
+import { UnmappedInstrument } from '@/pages/UnmappedInstrument';
 import { Venues } from '@/pages/Venues';
 import { readAntdComponentTokens, readAntdTokens } from '@/styles/tokens';
 import '@/styles/global.css';
@@ -69,18 +80,40 @@ function Chrome() {
   return (
     <ConfigProvider locale={ANTD_LOCALE[locale]} theme={themeConfig}>
       <BrowserRouter basename={__BASE_PATH__}>
-        <AppShell dark={dark} onToggleTheme={toggleTheme}>
-          <Routes>
-            <Route path="/" element={<Overview />} />
-            <Route path="/scale" element={<SpotScale />} />
-            <Route path="/venues" element={<Venues />} />
-            <Route path="/perps" element={<Perps />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/quality" element={<DataQuality />} />
-            <Route path="/reports" element={<Reports />} />
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </AppShell>
+        <StatusBarProvider>
+          <AppShell dark={dark} onToggleTheme={toggleTheme}>
+            <Routes>
+              {/* 决策 */}
+              <Route path="/" element={<DecisionHome />} />
+              <Route path="/alerts" element={<AnomalyRadar />} />
+              <Route path="/alerts/:alertId" element={<AnomalyRadar />} />
+
+              {/* 研究 — Underlying 360 is reachable but not in the rail. */}
+              <Route path="/themes" element={<ThemeDemand />} />
+              <Route path="/candidates" element={<Candidates />} />
+              <Route path="/candidates/:candidateId" element={<Candidates />} />
+              <Route path="/underlying/by-:kind/:instrumentId" element={<UnmappedInstrument />} />
+              <Route path="/underlying/:underlyingId" element={<Underlying360 />} />
+
+              {/* 市场结构 */}
+              <Route path="/spot-scale" element={<SpotScale />} />
+              <Route path="/venues" element={<Venues />} />
+              <Route path="/perps" element={<Perps />} />
+
+              {/* 治理 */}
+              <Route path="/data-quality" element={<DataQuality />} />
+              <Route path="/reports" element={<Reports />} />
+              <Route path="/editions/:editionKey" element={<Reports />} />
+
+              <Route path="/search" element={<SearchPage />} />
+
+              {/* Renamed in R1; old links stay live. */}
+              <Route path="/scale" element={<Navigate to="/spot-scale" replace />} />
+              <Route path="/quality" element={<Navigate to="/data-quality" replace />} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </AppShell>
+        </StatusBarProvider>
       </BrowserRouter>
     </ConfigProvider>
   );

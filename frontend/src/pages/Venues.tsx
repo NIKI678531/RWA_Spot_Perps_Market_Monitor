@@ -1,15 +1,21 @@
 /**
- * T2 — where tokenized RWAs actually trade.
+ * T2 — 交易场所 (UI-LAYOUT.md §2.2). P1 market-structure depth.
  *
  * Raw and quality-adjusted turnover are shown side by side everywhere on this page,
  * never behind a toggle. One venue in the reference data reports ~$29.3mn raw against
  * ~$216 adjusted because 17 of its 19 pairs are flagged; a reader shown either figure
  * alone draws the wrong conclusion, and a reader shown both immediately asks the right
  * question. The ranking itself is on the adjusted figure.
+ *
+ * R1 moves the venue selection and the type filter into the URL (rule 23) — the
+ * canonical form is `/venues?venue=`, which is what the backend's `href_for` emits, so
+ * a link out of an alert or a report lands on the venue it named rather than on the
+ * unfiltered list. Every pair row drills into Underlying 360, or into the honest
+ * "not mapped yet" page when the wrapper has no underlying.
  */
 
-import { useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Table, Tooltip } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { AlertTriangle } from 'lucide-react';
@@ -21,8 +27,12 @@ import { ChartFrame } from '@/charts/ChartFrame';
 import { AmountValue } from '@/components/AmountValue';
 import { EmptyState, ErrorState, TableSkeleton } from '@/components/states';
 import { useApi } from '@/hooks/useApi';
+import { useUrlState } from '@/hooks/useUrlState';
 import { useI18n } from '@/i18n';
+import { useLabels } from '@/i18n/labels';
 import { amountNumber, formatCount, formatPercent } from '@/utils/format';
+
+const DEFAULTS = { type: 'all', venue: '', flagged: '0' };
 
 const TYPE_FILTERS: ReadonlyArray<{ id: VenueType | 'all'; label: string }> = [
   { id: 'all', label: '全部' },
@@ -41,6 +51,7 @@ const SEGMENT_LABEL: Record<string, string> = {
 
 function ConcentrationCards({ rows }: { rows: ConcentrationSummary[] }) {
   const { t } = useI18n();
+  const label = useLabels();
   if (rows.length === 0) return null;
 
   return (
@@ -57,10 +68,7 @@ function ConcentrationCards({ rows }: { rows: ConcentrationSummary[] }) {
           <div className="card stack-sm" key={row.segment}>
             <div className="row-between">
               <span className="card__title">
-                {t(
-                  `venues.segment.${row.segment}`,
-                  SEGMENT_LABEL[row.segment] ?? row.segment,
-                )}
+                {label.from('venues.segment', row.segment, SEGMENT_LABEL)}
               </span>
               {row.is_concentrated ? (
                 <span className="tag-divergent">
@@ -95,40 +103,37 @@ function ConcentrationCards({ rows }: { rows: ConcentrationSummary[] }) {
 
 export function Venues() {
   const { t } = useI18n();
-  const [params, setParams] = useSearchParams();
-  const query = params.get('q') ?? '';
-  const [venueType, setVenueType] = useState<VenueType | 'all'>('all');
-  const [selected, setSelected] = useState<string | null>(null);
+  const navigate = useNavigate();
+  const { state: filters, setState, reset } = useUrlState(DEFAULTS);
 
   const ranking = useApi(
     (signal) =>
-      api.venues({ venue_type: venueType === 'all' ? undefined : venueType }, signal),
-    [venueType],
+      api.venues(
+        { venue_type: filters.type === 'all' ? undefined : filters.type },
+        signal,
+      ),
+    [filters.type],
   );
+
   const pairs = useApi(
-    (signal) => api.pairs({ venue_id: selected ?? undefined, limit: 100 }, signal),
-    [selected],
+    (signal) =>
+      api.pairs(
+        {
+          venue_id: filters.venue || undefined,
+          flagged_only: filters.flagged === '1' ? true : undefined,
+          limit: 200,
+        },
+        signal,
+      ),
+    [filters.venue, filters.flagged],
   );
 
-  const needle = query.trim().toLowerCase();
-
-  const rows = useMemo<VenueRow[]>(() => {
-    const all = ranking.data?.rows ?? [];
-    if (!needle) return all;
-    return all.filter((row) => row.name.toLowerCase().includes(needle));
-  }, [ranking.data, needle]);
-
-  const pairRows = useMemo<PairRow[]>(() => {
-    const all = pairs.data?.rows ?? [];
-    if (!needle) return all;
-    return all.filter(
-      (row) =>
-        row.symbol.toLowerCase().includes(needle) ||
-        row.venue.toLowerCase().includes(needle),
-    );
-  }, [pairs.data, needle]);
-
+  const rows = useMemo<VenueRow[]>(() => ranking.data?.rows ?? [], [ranking.data]);
+  const pairRows = useMemo<PairRow[]>(() => pairs.data?.rows ?? [], [pairs.data]);
   const top = rows.slice(0, 10);
+
+  const selectedName =
+    rows.find((row) => row.venue_id === filters.venue)?.name ?? filters.venue;
 
   const columns: ColumnsType<VenueRow> = [
     {
@@ -209,15 +214,26 @@ export function Venues() {
   ];
 
   const pairColumns: ColumnsType<PairRow> = [
-    { title: t('common.pair', '交易对'), dataIndex: 'symbol', key: 'symbol' },
+    {
+      title: t('common.pair', '交易对'),
+      key: 'symbol',
+      render: (_value, row) => (
+        <span className="stack-xs">
+          <span>{row.symbol}</span>
+          {row.underlying_id ? null : (
+            <span className="card__hint">
+              {t('venues.unmapped', '尚未映射到底层')}
+            </span>
+          )}
+        </span>
+      ),
+    },
     { title: t('common.venue', '交易场所'), dataIndex: 'venue', key: 'venue' },
     {
       title: t('common.raw', '原始成交额'),
       key: 'raw',
       align: 'right',
-      render: (_value, row) => (
-        <AmountValue amount={row.raw_vol_24h} showScope={false} />
-      ),
+      render: (_value, row) => <AmountValue amount={row.raw_vol_24h} showScope={false} />,
     },
     {
       title: t('common.adjusted', '质量调整成交额'),
@@ -250,34 +266,52 @@ export function Venues() {
         <div>
           <h1 className="page-title">{t('venues.title', '交易场所')}</h1>
           <p className="card__hint">
-            {t('venues.subtitle', '代币化 RWA 真正成交的地方，按质量调整口径排名')}
+            {t('venues.subtitle', '代币化 RWA 真正成交的地方，按质量调整口径排名。')}
           </p>
-        </div>
-        <div className="chip-row" role="group" aria-label={t('common.type', '类型')}>
-          {TYPE_FILTERS.map((filter) => (
-            <button
-              key={filter.id}
-              type="button"
-              className={filter.id === venueType ? 'chip chip--active' : 'chip'}
-              onClick={() => setVenueType(filter.id)}
-              aria-pressed={filter.id === venueType}
-            >
-              {t(`venues.type.${filter.id}`, filter.label)}
-            </button>
-          ))}
         </div>
       </div>
 
-      {needle ? (
+      <section className="card filter-bar stack-sm">
+        <div className="filter-group">
+          <span className="filter-group__label">{t('common.type', '类型')}</span>
+          <div className="chip-row" role="group" aria-label={t('common.type', '类型')}>
+            {TYPE_FILTERS.map((filter) => (
+              <button
+                key={filter.id}
+                type="button"
+                className={filter.id === filters.type ? 'chip chip--active' : 'chip'}
+                onClick={() => setState({ type: filter.id })}
+                aria-pressed={filter.id === filters.type}
+              >
+                {t(`venues.type.${filter.id}`, filter.label)}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="chip-row">
-          <span className="chip chip--active">
-            {t('common.filter', '筛选')}: {query}
-          </span>
-          <button type="button" className="chip" onClick={() => setParams({})}>
-            {t('common.clear', '清除')}
+          {filters.venue ? (
+            <button
+              type="button"
+              className="chip chip--active"
+              onClick={() => setState({ venue: '' })}
+            >
+              {t('common.venue', '交易场所')}：{selectedName} ×
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={filters.flagged === '1' ? 'chip chip--active' : 'chip'}
+            aria-pressed={filters.flagged === '1'}
+            onClick={() => setState({ flagged: filters.flagged === '1' ? '0' : '1' })}
+          >
+            {t('venues.onlyFlagged', '只看被质量标记的对')}
+          </button>
+          <button type="button" className="chip" onClick={reset}>
+            {t('common.reset', '重置筛选')}
           </button>
         </div>
-      ) : null}
+      </section>
 
       <ChartFrame
         title={t('venues.chart', '质量调整成交额前十')}
@@ -288,13 +322,17 @@ export function Venues() {
         footnote={ranking.data?.meta.note}
         tableColumns={[
           { key: 'venue', title: t('common.venue', '交易场所') },
+          { key: 'raw', title: t('common.raw', '原始'), numeric: true },
           { key: 'adjusted', title: t('common.adjusted', '质量调整'), numeric: true },
         ]}
         tableRows={top.map((row) => ({
           venue: row.name,
+          raw: <AmountValue amount={row.raw_vol_24h} showScope={false} />,
           adjusted: <AmountValue amount={row.adjusted_vol_24h} showScope={false} />,
         }))}
       >
+        {/* Two series, one scope — legal on one axis, and the gap between the pair of
+            bars is the point of the chart. */}
         <BarRanking
           categories={top.map((row) => row.name)}
           scope="spot_volume"
@@ -304,6 +342,11 @@ export function Venues() {
               scope: 'spot_volume',
               values: top.map((row) => amountNumber(row.adjusted_vol_24h)),
             },
+            {
+              name: t('common.raw', '原始'),
+              scope: 'spot_volume',
+              values: top.map((row) => amountNumber(row.raw_vol_24h)),
+            },
           ]}
         />
       </ChartFrame>
@@ -311,13 +354,11 @@ export function Venues() {
       <ConcentrationCards rows={ranking.data?.concentration ?? []} />
 
       <section className="card stack-md">
-        <div className="row-between">
-          <h2 className="section-title">{t('venues.table', '场所明细')}</h2>
-          {selected ? (
-            <button type="button" className="chip" onClick={() => setSelected(null)}>
-              {t('venues.clearVenue', '取消场所筛选')}
-            </button>
-          ) : null}
+        <div className="card__head">
+          <h2 className="card__title">{t('venues.table', '场所明细')}</h2>
+          <span className="card__hint">
+            {t('venues.tableHint', '点击一行，下方交易对表切换到该场所。')}
+          </span>
         </div>
 
         {ranking.loading ? (
@@ -334,22 +375,28 @@ export function Venues() {
             columns={columns}
             dataSource={rows}
             onRow={(row) => ({
-              onClick: () => setSelected(row.venue_id),
+              onClick: () =>
+                setState({ venue: filters.venue === row.venue_id ? '' : row.venue_id }),
               style: { cursor: 'pointer' },
             })}
             rowClassName={(row) =>
-              row.venue_id === selected ? 'ant-table-row-selected' : ''
+              row.venue_id === filters.venue ? 'ant-table-row-selected' : ''
             }
           />
         )}
       </section>
 
       <section className="card stack-md">
-        <h2 className="section-title">
-          {selected
-            ? `${t('venues.pairs', '交易对明细')} · ${selected}`
-            : t('venues.pairsAll', '交易对明细 · 全市场前 100')}
-        </h2>
+        <div className="card__head">
+          <h2 className="card__title">
+            {filters.venue
+              ? `${t('venues.pairs', '交易对明细')} · ${selectedName}`
+              : t('venues.pairsAll', '交易对明细 · 全市场')}
+          </h2>
+          <span className="card__hint">
+            {t('venues.pairsHint', '点击一行进入底层 360。')}
+          </span>
+        </div>
         {pairs.loading ? (
           <TableSkeleton />
         ) : pairs.error ? (
@@ -363,6 +410,15 @@ export function Venues() {
             pagination={{ pageSize: 20, hideOnSinglePage: true }}
             columns={pairColumns}
             dataSource={pairRows}
+            onRow={(row) => ({
+              onClick: () =>
+                navigate(
+                  row.underlying_id
+                    ? `/underlying/${row.underlying_id}`
+                    : `/underlying/by-asset/${row.asset_id}`,
+                ),
+              style: { cursor: 'pointer' },
+            })}
           />
         )}
       </section>

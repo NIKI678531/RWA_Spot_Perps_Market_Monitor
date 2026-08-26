@@ -30,6 +30,17 @@ export function disabledColor(): string {
   return cssVar('--color-text-disabled', '#94A3B8');
 }
 
+/**
+ * Reference lines drawn over a plot area — a threshold, a quadrant split, a baseline.
+ *
+ * Stronger than the grid so it reads as an assertion about the data rather than as
+ * chrome, but still a border token: a guide line is not a series and must not take a
+ * palette colour, or the reader starts looking for the category it belongs to.
+ */
+export function guideColor(): string {
+  return cssVar('--color-border-strong', 'rgba(100,116,139,0.55)');
+}
+
 export function semanticColor(sign: 'positive' | 'negative' | 'neutral'): string {
   if (sign === 'positive') return cssVar('--color-success', '#52C41A');
   if (sign === 'negative') return cssVar('--color-error', '#F5222D');

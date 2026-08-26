@@ -15,7 +15,6 @@
  */
 
 import type { MetricScope } from '@/api/types';
-import { scopeLabel } from '@/api/types';
 
 export class ChartScopeError extends Error {
   constructor(message: string) {
@@ -117,13 +116,9 @@ export function convergeToTop8<T>(
   return { rows: head, other: { label: otherLabel, value: total } };
 }
 
-/**
- * The axis title carries the full scope phrase — "成交额" alone names no scope.
- *
- * Only two label sets exist; ko and zh-TW fall back to zh rather than to a scope
- * phrase we have not had reviewed, since a mistranslated scope is exactly the kind of
- * error this whole layer exists to prevent.
+/*
+ * The axis title is not here. It carries the full scope phrase — "成交额" alone names
+ * no scope — and that phrase is translated, so it comes from `useLabels().scope()` at
+ * the chart component rather than from a pure helper this module could export. Putting
+ * it here would mean a second, untranslated source for the same words.
  */
-export function axisTitle(scope: MetricScope, locale = 'zh'): string {
-  return scopeLabel(scope, locale);
-}

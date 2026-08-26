@@ -4,12 +4,24 @@ Cadences follow ARCHITECTURE.md §12, in Hong Kong time:
 
 ===============  ==============================================================
 every 15 min     headline snapshot (Binance TradFi ticker, Hyperliquid ctxs)
+every 15 min     close any launch window that has elapsed (offset from the above)
+every 15 min     SLA scan over open, published alerts
 every 1 hour     spot Top 50 + GeckoTerminal pools + Hyperliquid perp DEXs +
                  TradFi reference prices (only when Alpaca is configured)
+every 1 hour     data-gap scan across the five Data Quality zones
 every 6 hours    long-tail spot, category totals, issuer product counts
 daily 03:00      baseline recompute
-daily 08:00      generate xlsx + docx
+daily 09:00      freeze the morning edition, with its digest
+daily 09:30      freeze watchdog — did 09:00 actually produce an edition
+daily 17:00      freeze the afternoon edition, with its digest
+daily 17:15      generate xlsx + docx from the frozen afternoon cut
+daily 17:30      freeze watchdog for 17:00
 ===============  ==============================================================
+
+The 09:00 and 17:00 jobs are the only ones whose *scheduled* time is part of the
+output: an edition's cut-off is the time it was due, not the time it ran, so a job
+that starts three minutes late produces the edition it would have produced on time.
+Everything else stamps the instant it actually observed.
 
 Three properties hold for every job here:
 
@@ -42,11 +54,13 @@ from app.core.config import settings
 from app.core.metrics import MetricScope
 from app.core.sessions import MarketSession
 from app.db.session import SessionLocal
-from app.models.enums import EntityType, FetchStatus
+from app.models.enums import DataGapKind, EditionKind, EntityType, FetchStatus
 from app.models.facts import FactAssetSnapshot, FactPerpContractSnapshot
 from app.models.operations import BaselineSnapshot, FetchLog
 from app.services.analytics.baseline import compute_baseline
+from app.services.analytics import launch_window
 from app.services.anomaly.engine import build_default_engine
+from app.services.editions import daily as editions_daily
 from app.services.ingest import registry
 from app.services.ingest.base import Collector, FetchResult, record_fetches
 from app.services.ingest.alpaca import build_collectors as build_reference_collectors
@@ -58,6 +72,9 @@ from app.services.ingest.hyperliquid import HyperliquidCollector
 from app.services.ingest.issuer_official import IssuerOfficialCollector
 from app.services.normalize import seed as reference_seed
 from app.services.report import service as report_service
+from app.services.report.dataset import load as load_dataset
+from app.services.workflow import gap_scan, sla
+from app.services.workflow.data_gap import GapCandidate, reconcile
 
 logger = logging.getLogger(__name__)
 
@@ -234,6 +251,96 @@ def daily_report() -> None:
         logger.info(
             "generated %s", ", ".join(a.filename for a in artifacts) or "nothing"
         )
+
+
+def close_launch_windows() -> int:
+    """Every 15 minutes: close any 1h/6h/24h window that has just elapsed.
+
+    On this cadence rather than hourly because the windows are measured from the
+    listing moment. A wrapper first seen at 14:20 closes its 1h window at 15:20, and
+    an hourly job would record that as 16:00 — three quarters of an hour of a
+    one-hour window, labelled as the whole of it.
+    """
+    with SessionLocal() as session:
+        written = launch_window.record_windows(session, now_utc())
+        session.commit()
+    return written
+
+
+def scan_sla() -> int:
+    """Every 15 minutes: record newly breached response deadlines.
+
+    Recorded on the alert rather than computed on read, so "this sat unclaimed for
+    nine hours" survives into the retrospective and the threshold review.
+    """
+    with SessionLocal() as session:
+        breaches = sla.scan(session)
+        session.commit()
+    return len(breaches)
+
+
+def scan_data_gaps() -> int:
+    """Hourly: fold the five Data Quality zones into the ownable gap queue.
+
+    Nothing here closes a gap. A defect that stopped being detected may have stopped
+    because the scan itself broke.
+    """
+    with SessionLocal() as session:
+        opened, recurring = gap_scan.scan(session, load_dataset(session))
+        session.commit()
+        return len(opened) + len(recurring)
+
+
+def freeze_morning() -> None:
+    _freeze(EditionKind.MORNING)
+
+
+def freeze_afternoon() -> None:
+    _freeze(EditionKind.AFTERNOON)
+
+
+def _freeze(kind: EditionKind) -> None:
+    """Write one frozen edition and its digest.
+
+    ``run_freeze`` handles its own failure: a freeze that breaks writes a ``FAILED``
+    edition carrying the reason rather than leaving a hole, because a missing 09:00
+    edition reads on screen as "the 09:00 number has not changed".
+    """
+    with SessionLocal() as session:
+        edition = editions_daily.run_freeze(session, kind)
+        logger.info("edition %s: %s", edition.edition_key, edition.status.value)
+
+
+def check_freezes() -> list[str]:
+    """Notice the freeze that never ran at all.
+
+    ``record_failure`` covers a freeze that broke; nothing covers a process that was
+    down at 09:00, because a job that did not run writes nothing. ED-001 is a claim
+    about five consecutive days being *present*, so absence has to be scanned for.
+    """
+    with SessionLocal() as session:
+        missing = editions_daily.missing_freezes(session)
+        if missing:
+            reconcile(
+                session,
+                [
+                    GapCandidate(
+                        kind=DataGapKind.SOURCE_HEALTH,
+                        dedup_key=f"edition_missing:{key}",
+                        title=f"冻结版 {key} 未生成",
+                        detail=(
+                            "计划时间已过，但没有对应的 edition 行。"
+                            "任务未运行时不会留下任何记录，只能靠巡检发现。"
+                        ),
+                        blocks="该时点没有可引用的版本，相关结论无法固定到某一版。",
+                        is_blocking=True,
+                    )
+                    for key in missing
+                ],
+            )
+            logger.error("missing frozen editions: %s", ", ".join(missing))
+        session.commit()
+    return missing
 
 
 def recompute_baselines() -> int:
@@ -512,6 +619,61 @@ def build_scheduler() -> BackgroundScheduler:
         max_instances=1,
         coalesce=True,
     )
+
+    # Offset from the collection passes so the single worker is not asked to run a
+    # scan behind a ten-minute rate-limited fetch. These are all short.
+    scheduler.add_job(
+        close_launch_windows,
+        CronTrigger(minute="10,25,40,55"),
+        id="close_launch_windows",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=900,
+    )
+    scheduler.add_job(
+        scan_sla,
+        CronTrigger(minute="7,22,37,52"),
+        id="scan_sla",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=900,
+    )
+    scheduler.add_job(
+        scan_data_gaps,
+        CronTrigger(minute=35),
+        id="scan_data_gaps",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+
+    # The two frozen cuts, and the watchdogs that notice when one did not happen.
+    # ``coalesce`` and a generous grace time are safe here precisely because the
+    # cut-off is the scheduled time: a late run still produces the on-time edition.
+    scheduler.add_job(
+        freeze_morning,
+        CronTrigger(hour=9, minute=0),
+        id="freeze_morning",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+    scheduler.add_job(
+        freeze_afternoon,
+        CronTrigger(hour=17, minute=0),
+        id="freeze_afternoon",
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=1800,
+    )
+    scheduler.add_job(
+        check_freezes,
+        CronTrigger(hour="9,17", minute=30),
+        id="check_freezes",
+        max_instances=1,
+        coalesce=True,
+    )
+
     scheduler.add_job(
         daily_report,
         CronTrigger.from_crontab(settings.daily_report_cron),

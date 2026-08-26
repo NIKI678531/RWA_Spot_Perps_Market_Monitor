@@ -1,13 +1,19 @@
 /**
- * The application shell: liquid background, 200px nav rail, top bar, content column.
+ * The application shell: liquid background, 200px nav rail, top bar, status strip.
  *
- * The rail is pinned open. It costs 200px of width that wide tables would happily
- * take, and it is worth it: a monitor is read by people who need to see where else
- * they can look without moving the pointer to find out.
+ * The rail is pinned open and grouped by what the reader is trying to do rather than
+ * by which table the data came from — 决策 / 研究 / 市场结构 / 治理. That ordering is
+ * the decision loop itself (detect → verify → explain → act → review), and a screen
+ * that serves none of its five steps does not get a rail entry.
  *
- * The top bar carries the data timestamp permanently. Someone reading a monitor
- * needs to know how old the numbers are at all times — without it, every figure on
- * screen is uninterpretable, so it is chrome rather than a per-page concern.
+ * Underlying 360 is deliberately absent. It is an entity page, reached by drilling
+ * into a name from anywhere; putting it in the rail would force the reader to choose
+ * an entity before they have been told which one matters.
+ *
+ * The status strip below the top bar is permanent chrome for the same reason the
+ * timestamp used to be: without "when is this from, and can I trust it", every figure
+ * on screen is uninterpretable — including in the screenshot someone pastes into a
+ * deck six weeks from now.
  */
 
 import { useCallback, useMemo, type ReactNode } from 'react';
@@ -19,20 +25,27 @@ import {
   FileText,
   Gauge,
   LayoutDashboard,
+  Layers3,
   Moon,
+  Radar,
   ShieldCheck,
   Sun,
+  Target,
 } from 'lucide-react';
 
 import { api } from '@/api/client';
+import { EditionPicker } from '@/components/EditionPicker';
+import { GlobalSearch } from '@/components/GlobalSearch';
+import { IdentityMenu } from '@/components/IdentityMenu';
+import { StatusBarStrip } from '@/components/StatusBar';
 import { useApi } from '@/hooks/useApi';
 import { LOCALES, useI18n, type Locale } from '@/i18n';
-import { formatAge, formatTimestamp, minutesSince } from '@/utils/format';
 
 interface NavItem {
   to: string;
   labelKey: string;
   fallback: string;
+  hint: string;
   icon: ReactNode;
 }
 
@@ -42,91 +55,112 @@ interface NavGroup {
   items: NavItem[];
 }
 
+/**
+ * The four groups are the loop: decide what matters, research why, understand the
+ * structure behind it, govern whether it may be said at all.
+ */
 const NAV: NavGroup[] = [
   {
-    labelKey: 'nav.group.overview',
-    fallback: '总览',
+    labelKey: 'nav.group.decide',
+    fallback: '决策',
     items: [
       {
         to: '/',
-        labelKey: 'nav.overview',
-        fallback: '概览',
+        labelKey: 'nav.home',
+        fallback: '决策首页',
+        hint: '今天最该看的四个问题',
         icon: <LayoutDashboard size={20} aria-hidden />,
+      },
+      {
+        to: '/alerts',
+        labelKey: 'nav.alerts',
+        fallback: '异常雷达',
+        hint: '认领、取证、处置、复盘',
+        icon: <Radar size={20} aria-hidden />,
       },
     ],
   },
   {
-    labelKey: 'nav.group.market',
-    fallback: '市场',
+    labelKey: 'nav.group.research',
+    fallback: '研究',
     items: [
       {
-        to: '/scale',
+        to: '/themes',
+        labelKey: 'nav.themes',
+        fallback: '主题需求',
+        hint: '哪些需求主题在升温',
+        icon: <Layers3 size={20} aria-hidden />,
+      },
+      {
+        to: '/candidates',
+        labelKey: 'nav.candidates',
+        fallback: '发行候选',
+        hint: '可评估的发行标的与门禁',
+        icon: <Target size={20} aria-hidden />,
+      },
+    ],
+  },
+  {
+    labelKey: 'nav.group.structure',
+    fallback: '市场结构',
+    items: [
+      {
+        to: '/spot-scale',
         labelKey: 'nav.scale',
         fallback: '现货规模',
+        hint: '市值与成交的分布',
         icon: <BarChart3 size={20} aria-hidden />,
       },
       {
         to: '/venues',
         labelKey: 'nav.venues',
         fallback: '交易场所',
+        hint: '场所之间的竞争格局',
         icon: <Building2 size={20} aria-hidden />,
       },
-    ],
-  },
-  {
-    labelKey: 'nav.group.perps',
-    fallback: '永续',
-    items: [
       {
         to: '/perps',
         labelKey: 'nav.perps',
         fallback: '永续合约',
+        hint: '跨场所永续成交与持仓',
         icon: <Gauge size={20} aria-hidden />,
       },
     ],
   },
   {
-    labelKey: 'nav.group.demand',
-    fallback: '需求',
+    labelKey: 'nav.group.govern',
+    fallback: '治理',
     items: [
       {
-        to: '/alerts',
-        labelKey: 'nav.alerts',
-        fallback: '异常雷达',
-        icon: <Activity size={20} aria-hidden />,
-      },
-    ],
-  },
-  {
-    labelKey: 'nav.group.ops',
-    fallback: '运维',
-    items: [
-      {
-        to: '/quality',
+        to: '/data-quality',
         labelKey: 'nav.quality',
         fallback: '数据质量',
+        hint: '结论能不能对外说',
         icon: <ShieldCheck size={20} aria-hidden />,
       },
       {
         to: '/reports',
         labelKey: 'nav.reports',
-        fallback: '报告',
+        fallback: '报告与复盘',
+        hint: '版本、日报、阈值复盘',
         icon: <FileText size={20} aria-hidden />,
       },
     ],
   },
 ];
 
-/** Flattened for the breadcrumb; Underlying 360 is intentionally not in NAV. */
-const TITLES: Record<string, [string, string]> = Object.fromEntries(
-  NAV.flatMap((group) => group.items).map((item) => [
-    item.to,
-    [item.labelKey, item.fallback],
-  ]),
-);
-
-/** Beyond this the timestamp turns amber: the hourly pass has visibly missed. */
-const STALE_AFTER_MINUTES = 90;
+/**
+ * Breadcrumb labels, including the destinations that are not in the rail. Longest
+ * prefix wins, so `/alerts/128` reads as 异常雷达 rather than falling back to nothing.
+ */
+const TITLES: ReadonlyArray<[string, string, string]> = [
+  ...NAV.flatMap((group) => group.items).map(
+    (item) => [item.to, item.labelKey, item.fallback] as [string, string, string],
+  ),
+  ['/underlying', 'nav.underlying', '底层 360'],
+  ['/editions', 'nav.editions', '版本'],
+  ['/search', 'nav.search', '搜索'],
+];
 
 export interface AppShellProps {
   children: ReactNode;
@@ -138,18 +172,22 @@ export function AppShell({ children, dark, onToggleTheme }: AppShellProps) {
   const { t, locale, setLocale } = useI18n();
   const location = useLocation();
 
-  const health = useApi((signal) => api.health(signal), []);
-  const asOf = health.data?.as_of ?? null;
-  const age = minutesSince(asOf);
+  // The shell's own status bar answers for the warehouse as a whole. A page that
+  // knows better publishes its own through `usePageStatus` and this is never seen.
+  const status = useApi((signal) => api.statusBar(undefined, signal), []);
 
-  const stampClass = useMemo(() => {
-    if (!asOf) return 'topbar__stamp topbar__stamp--missing';
-    if (age !== null && age > STALE_AFTER_MINUTES)
-      return 'topbar__stamp topbar__stamp--stale';
-    return 'topbar__stamp';
-  }, [asOf, age]);
+  const crumb = useMemo(() => {
+    const matches = TITLES.filter(
+      ([path]) =>
+        location.pathname === path ||
+        (path !== '/' && location.pathname.startsWith(`${path}/`)),
+    );
+    if (!matches.length) return null;
+    return matches.reduce((best, entry) =>
+      entry[0].length > best[0].length ? entry : best,
+    );
+  }, [location.pathname]);
 
-  const crumb = TITLES[location.pathname];
   const onLocale = useCallback((next: Locale) => () => setLocale(next), [setLocale]);
 
   return (
@@ -159,7 +197,7 @@ export function AppShell({ children, dark, onToggleTheme }: AppShellProps) {
       </div>
 
       <div className="shell">
-        <nav className="rail" aria-label="主导航">
+        <nav className="rail" aria-label={t('nav.aria', '主导航')}>
           <div className="rail__brand">
             <Activity size={22} aria-hidden />
             <span className="rail__label" style={{ fontWeight: 600 }}>
@@ -177,6 +215,7 @@ export function AppShell({ children, dark, onToggleTheme }: AppShellProps) {
                   key={item.to}
                   to={item.to}
                   end={item.to === '/'}
+                  title={item.hint}
                   className={({ isActive }) =>
                     isActive ? 'rail__item rail__item--active' : 'rail__item'
                   }
@@ -196,29 +235,18 @@ export function AppShell({ children, dark, onToggleTheme }: AppShellProps) {
               {crumb ? (
                 <>
                   <span aria-hidden>·</span>
-                  <strong>{t(crumb[0], crumb[1])}</strong>
+                  <strong>{t(crumb[1], crumb[2])}</strong>
                 </>
               ) : null}
             </div>
 
+            <GlobalSearch />
+
             <div className="topbar__spacer" />
 
-            <div
-              className={stampClass}
-              title={asOf ? formatTimestamp(asOf) : undefined}
-            >
-              <span>{t('shell.dataAsOf', '数据时间')}</span>
-              {asOf ? (
-                <>
-                  <span>{formatTimestamp(asOf)}</span>
-                  <span className="muted">({formatAge(asOf)})</span>
-                </>
-              ) : (
-                <span>{t('shell.noData', '尚未采集')}</span>
-              )}
-            </div>
+            <EditionPicker />
 
-            <div className="chip-row" role="group" aria-label="语言">
+            <div className="chip-row" role="group" aria-label={t('shell.locale', '语言')}>
               {LOCALES.map((entry) => (
                 <button
                   key={entry.id}
@@ -240,7 +268,11 @@ export function AppShell({ children, dark, onToggleTheme }: AppShellProps) {
             >
               {dark ? <Sun size={16} aria-hidden /> : <Moon size={16} aria-hidden />}
             </button>
+
+            <IdentityMenu />
           </header>
+
+          <StatusBarStrip fallback={status.data?.status_bar ?? null} />
 
           <main className="shell__content">{children}</main>
         </div>

@@ -66,6 +66,21 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def as_utc(value: datetime) -> datetime:
+    """Normalise a timestamp to aware UTC before comparing it to another.
+
+    Neither SQLite nor MySQL hands back what ``DateTime(timezone=True)`` implies:
+    SQLite has no timezone type at all and MySQL's driver returns naive values, so a
+    timestamp read from the database compares as naive while :func:`utcnow` is aware,
+    and ``now > alert.sla_due_ts`` raises ``TypeError``. Everything is written as UTC,
+    so attaching UTC to a naive value restores the meaning rather than assuming one.
+
+    Use this on **both** sides of any comparison between a stored timestamp and a
+    computed one — which side is naive depends on the dialect, not on the code.
+    """
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
 def created_at_column(**kwargs: Any) -> Any:
     return mapped_column(
         DateTime(timezone=True), default=utcnow, nullable=False, **kwargs
@@ -84,6 +99,7 @@ def snapshot_pk_column(**kwargs: Any) -> Any:
 __all__ = [
     "Base",
     "Decimal",
+    "as_utc",
     "created_at_column",
     "enum_column",
     "id_column",

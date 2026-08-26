@@ -34,6 +34,7 @@ from app.models.dimensions import (
 )
 from app.models.enums import (
     AlertSeverity,
+    AlertState,
     AlertStatus,
     AssetClass,
     DetectorFamily,
@@ -48,6 +49,7 @@ from app.models.facts import (
     FactPerpContractSnapshot,
 )
 from app.core.metrics import MetricScope
+from app.services.anomaly.publication import sla_due
 
 NOW = datetime(2026, 8, 17, 14, 0, tzinfo=timezone.utc)
 
@@ -235,6 +237,9 @@ def _seed(session: Session) -> None:
         ]
     )
 
+    # Published: the gate has run and stamped ``published_at``, which is what makes
+    # this one visible. Seeded in that state rather than as a bare detector output,
+    # because rule 14 means an unstamped row is invisible on every read path.
     alert = Alert(
         dedup_key="X1:spyb:CLOSED_WEEKEND",
         detector="X1",
@@ -246,6 +251,10 @@ def _seed(session: Session) -> None:
         severity=AlertSeverity.HIGH,
         score=Decimal("0.82"),
         status=AlertStatus.CONFIRMED,
+        state=AlertState.PUBLISHED,
+        published_at=NOW,
+        sla_due_ts=sla_due(AlertSeverity.HIGH, NOW),
+        evidence_completeness=Decimal("1"),
         headline_zh="SPY 换手率显著高于同类",
         first_seen_ts=NOW,
         last_seen_ts=NOW,
@@ -265,6 +274,28 @@ def _seed(session: Session) -> None:
             market_session=MarketSession.CLOSED_WEEKEND,
             peer_count=12,
             extra_json='{"turnover": 0.0724}',
+        )
+    )
+
+    # Detected but never published: below the notional floor, so the gate held it.
+    # It exists so the tests can prove it stays out of every response.
+    session.add(
+        Alert(
+            dedup_key="X1:tiny:CLOSED_WEEKEND",
+            detector="X1",
+            family=DetectorFamily.CROSS_SECTIONAL,
+            entity_type=EntityType.UNDERLYING,
+            entity_id="SPY",
+            metric_scope=MetricScope.SPOT_VOLUME,
+            market_session=MarketSession.CLOSED_WEEKEND,
+            severity=AlertSeverity.HIGH,
+            score=Decimal("0.99"),
+            status=AlertStatus.CONFIRMED,
+            state=AlertState.DETECTED,
+            headline_zh="未通过发布闸门的探测结果",
+            first_seen_ts=NOW,
+            last_seen_ts=NOW,
+            occurrence_count=1,
         )
     )
     session.commit()
@@ -430,6 +461,27 @@ def test_alerts_carry_the_evidence_that_justifies_them(client: TestClient) -> No
 def test_alerts_can_be_filtered_by_severity(client: TestClient) -> None:
     assert client.get(_url("/alerts"), params={"severity": "low"}).json()["rows"] == []
     assert client.get(_url("/alerts"), params={"severity": "high"}).json()["rows"]
+
+
+def test_a_detected_finding_is_not_a_published_one(client: TestClient) -> None:
+    """Rule 14: detection is not publication.
+
+    The seeded ``X1:tiny`` row scores higher than the published one, so if the read
+    paths sorted before filtering it would be the first thing anyone saw. It has no
+    ``published_at``, so it must appear nowhere — not in the list, not in the queue,
+    and not by asking for it directly.
+    """
+    listed = client.get(_url("/alerts"), params={"severity": "high"}).json()
+    assert [row["headline_zh"] for row in listed["rows"]] == ["SPY 换手率显著高于同类"]
+
+    queue = client.get(_url("/alerts/queue")).json()
+    assert all(row["detector"] == "X1" for row in queue["rows"])
+    assert len(queue["rows"]) == 1
+
+    # Two alerts are seeded, so the one missing from the list is the held one.
+    published = {row["id"] for row in listed["rows"]}
+    held = next(i for i in (1, 2) if i not in published)
+    assert client.get(_url(f"/alerts/{held}")).status_code == 404
 
 
 # --- timeseries -------------------------------------------------------------

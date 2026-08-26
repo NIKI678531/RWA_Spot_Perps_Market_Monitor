@@ -1,7 +1,8 @@
 # RWA Spot & Perps Market Monitor — 架构设计
 
-> 版本 v2.0 · 2026-08-17
+> 版本 v3.0 · 2026-08-26（对齐 PRD v2.0《RWA 产品决策雷达》）
 > 术语以根目录 `CONTEXT.md` 为准。视觉规范以 `DESIGN.md` 为准（本文不修改该文件）。
+> R1 需求编号与验收标准见 `docs/REQUIREMENTS-R1.md`。
 > 检测器细则见 `docs/DETECTORS.md`；图表规范见 `docs/DATAVIZ.md`；版式见 `docs/UI-LAYOUT.md`。
 > 设计取舍的记录见 `docs/adr/`。业务背景见本文附录 A。
 
@@ -12,12 +13,20 @@
 系统持续采集代币化 RWA（股票 / ETF / 基金 / 商品）在 CEX、DEX 现货与跨所永续市场的公开数据，
 以时间序列落库，产出规模与成交排名、场所与发行商竞争格局、需求异常告警，以及每日 xlsx / docx 报告。
 
+R1 在此之上把系统从「市场数据展示」升级为**产品决策雷达**：每条发现都要走完
+**发现 → 验证 → 解释 → 行动 → 复盘**，并留下可审计的处理记录。
+数据范围、口径类型系统与检测器全部沿用 v2.0；新增的是发布门、告警工作流、版本（edition）与业务对象层。
+
 **范围内**：`rwa_tier ∈ {CORE_RWA, RWA_ADJACENT, SYNTHETIC}` 的标的。
 
 **范围外**：加密原生资产（BTC / ETH / SOL 等，`rwa_tier = NON_RWA`）。
 这类资产仅作为 `dim_benchmark` 的参照项存在，不进入任何统计口径、排名或告警。
 
-**非目标**：交易执行、投资建议、法律权利与储备的独立尽调、链上持有人级追踪。
+**非目标**：交易执行、投资建议、法律权利与储备的独立尽调、链上持有人级追踪；
+把多种口径合成单一「总分」；用任何分数直接决定发行。
+
+**R1 明确不做**：港股 / 韩国 / 商品的完整 session 日历（仅预留扩展接口）；
+以 Polymarket 预测概率驱动 RWA 告警或发行判断（仅作叙事背景）。
 
 ---
 
@@ -71,11 +80,14 @@ L4 STORE       MySQL 8.4 / SQLite
      │  星型模型；fact_* 仅追加，永不 UPDATE
 L5 ANALYTICS   services/analytics/     rollups · concentration(HHI/TopN) · baseline
    ANOMALY     services/anomaly/       engine + 17 detectors + scoring
-     │
-     ├── L6a API      FastAPI，挂在 settings.normalized_api_base_path 下
-     └── L6b REPORT   openpyxl → 22-sheet xlsx；python-docx → 分析报告
+     │                                 publication.py = 发布门，检测候选进入 alert 的唯一通道
+L6 BUSINESS    services/workflow/      告警生命周期 · 研究任务 · 发行候选 · 产品覆盖 · 数据缺口 · 审计
+   EDITIONS    services/editions/      Live / 冻结版生成 · 修订版 · 分享版脱敏
+     │  L6 由用户动作与调度驱动，不是单向管道的一环；它读 L5 产物与 alert，永不写 fact_*
+     ├── L7a API      FastAPI，挂在 settings.normalized_api_base_path 下
+     └── L7b REPORT   openpyxl → 22-sheet xlsx；python-docx → 分析报告
                       产物写对象存储或数据库，不落容器文件系统
-L7 WEB         React 18 + TS + antd 5 + ECharts
+L8 WEB         React 18 + TS + antd 5 + ECharts
 ```
 
 ---
@@ -114,8 +126,15 @@ class MetricScope(StrEnum):
 | `dim_venue` | `venue_id` | `venue_type`(CEX/DEX/PERP_DEX)、`chain`、`aliases[]` |
 | `dim_perp_contract` | `contract_id` | `exchange`、`perp_dex`(HIP-3)、`symbol`、`source_underlying_type`（原样）、`analysis_group`（我方）→ FK `underlying_id` |
 | `dim_pool` | `pool_id` | `network`、`dex`、`pool_address`、`quote_token`、`is_canonical_quote` |
-| `dim_theme` | `theme_id` | 需求主题：Pre-IPO / 半导体 / 贵金属 / 能源 / 杠杆 ETP / 宽基指数 |
+| `dim_theme` | `theme_id` | 需求主题：Pre-IPO / 半导体 / 贵金属 / 能源 / 杠杆 ETP / 宽基指数。定义与映射版本化，见 `theme_map` |
 | `dim_benchmark` | `benchmark_id` | **软聚合层**：把不同 tier 的 underlying 归到同一经济暴露（SPY ETF 与 S&P 500 指数、GOLD 与 XAU）。仅用于对照展示，**不参与任何求和** |
+| `dim_own_product` | `product_id` | **自有产品主表**：我方已发行 / 在研产品，用于覆盖缺口计算。权威系统与维护人在上线前确认 |
+| `dim_user` | `user_id` | owner 与角色（`VIEWER` / `ANALYST` / `OWNER` / `ADMIN` / `SHARE_VIEWER`），处理动作的责任主体 |
+
+`theme_map` 是版本化的多对多映射：`(underlying_id, theme_id, is_primary, version, valid_from,
+valid_to, confirmed_by, reason)`。**一个 underlying 在任一版本内有且只有一个 `is_primary = True`**——
+份额加总到 100% 的图只能用主题主口径，secondary 只用于并列观察。历史 edition 按其 `as_of`
+落在哪个版本区间来回放，主题定义变更不会追溯改写昨天的报告。
 
 `rwa_tier` 四层判定：
 
@@ -143,11 +162,24 @@ class MetricScope(StrEnum):
 | `fact_perp_venue_snapshot` | exchange × segment × ts | vol_24h、open_interest、symbol_count |
 | `fact_perp_contract_snapshot` | contract × ts | vol_24h、oi_units、oi_usd、funding_rate、mark、index |
 | `fact_category_snapshot` | category × ts | asset_count、market_cap、vol_24h、**is_additive** |
+| `fact_launch_window_snapshot` | (asset\|contract) × window × ts | `window ∈ {1h, 6h, 24h}`、各口径观测值、质量标记、跨所出现数、阶段结论。窗口一旦关闭即不可变，迟到数据出修订版 |
 
 ### 4.4 辅助表
 
-`source_registry`（源与 `auth_mode` / `status`）、`fetch_log`（每次采集状态）、`metric_scope`（口径注册表）、
-`underlying_map`（版本化映射）、`baseline`（分层基线快照）、`alert`、`alert_evidence`。
+**数据侧**：`source_registry`（源与 `auth_mode` / `status`）、`fetch_log`（每次采集状态）、
+`metric_scope`（口径注册表）、`underlying_map`（版本化映射）、`theme_map`（版本化主题映射）、
+`baseline`（分层基线快照）、`data_gap`（可分派的数据缺口队列：问题、影响页面/结论、owner、SLA、修复状态）。
+
+**告警与业务侧**：`alert`、`alert_evidence`（含反证字段）、`alert_action`（认领 / 转派 / 备注 /
+确认 / 判误 / 搁置 / 关闭，只追加）、`research_task`、`issuance_candidate`、`candidate_gate_log`
+（五道评估门的进入与退出记录）、`product_coverage`（`COVERED` / `CANDIDATE` / `GAP` /
+`COMPETITOR_FIRST`）、`audit_log`（谁在什么时候把什么从什么状态改成了什么）。
+
+**版本侧**：`edition`（`LIVE` / `MORNING` / `AFTERNOON`、`as_of`、`generated_at`、`version`、
+`is_immutable`）、`edition_revision`（修订原因与前后差异）、`edition_artifact`（导出物与对象存储 URI）。
+
+`alert_action` 与 `audit_log` 都是只追加。**状态不是字段更新出来的**：`alert.current_state`
+是动作流的物化视图，可以从 `alert_action` 完整重放。
 
 ---
 
@@ -220,9 +252,10 @@ severity = w1·norm(robust_z) + w2·norm(log10 绝对USD量) + w3·persistence
 ```
 
 - **绝对量门槛**：低于约 $50k 名义额一律不告警。$500 → $5,000 是 +900%，无商业意义。
-- **持续性**：单快照触发标 `TENTATIVE`，连续 2 个快照升 `CONFIRMED`。
+- **持续性**：单快照触发 `confirmation_count = 1`，状态 `TENTATIVE`；连续 2 个快照升 `PUBLISHED`。
 - **去重**：同一 `(entity, detector)` 在 24h 冷却窗内合并，`occurrence_count` 累加。
-- **可解释性**：每条告警落 `alert_evidence`，存原始值、基线、样本量、`market_session`、规则名。
+  `occurrence_count`（同一告警重复出现）与 `confirmation_count`（连续确认次数）是两个数，不可互相替代。
+- **可解释性**：每条告警落 `alert_evidence`，存原始值、基线、样本量、`market_session`、规则名与反证。
 
 ```json
 {
@@ -230,7 +263,9 @@ severity = w1·norm(robust_z) + w2·norm(log10 绝对USD量) + w3·persistence
   "detector": "T2_ColdStartAwakening",
   "family": "time_series",
   "severity": "HIGH",
-  "status": "CONFIRMED",
+  "state": "PUBLISHED",
+  "confirmation_count": 2,
+  "owner_id": null,
   "entity": {"type": "asset", "id": "spacex-bstocks-tokenized-stock", "symbol": "SPCXB"},
   "underlying_id": "SPACEX",
   "issuer_id": "bStocks",
@@ -241,46 +276,152 @@ severity = w1·norm(robust_z) + w2·norm(log10 绝对USD量) + w3·persistence
     "market_session": "CLOSED_WEEKEND", "sample_size": 14,
     "metric_scope": "spot_volume", "rule": "dormancy<=1e3 & current>=1e5 & ratio>=0.9"
   },
+  "counter_evidence": [
+    {"kind": "single_venue", "detail": "97% 成交来自单一场所 Binance"},
+    {"kind": "raw_adjusted_gap", "detail": "raw $412k vs adjusted $362k，1 个 pair 被标 stale"}
+  ],
   "first_seen": "...", "occurrence_count": 3
 }
 ```
 
+`state` 的完整状态机与迁移规则见 §9.2。检测器不写 `state`，写的是候选；
+`state` 由发布门与用户动作产生。
+
 ---
 
-## 9. API
+## 9. 发布门与告警工作流
+
+### 9.1 发布门
+
+检测器产出的是**候选**，不是告警。`services/anomaly/publication.py` 是候选进入 `alert` 表的唯一通道：
+
+| 闸门 | 条件 | 不通过时 |
+|:--|:--|:--|
+| 范围 | `rwa_tier ≠ NON_RWA` | 丢弃 |
+| 口径 | 证据中 `metric_scope` 单一且合法 | 丢弃并记工程错误 |
+| 绝对量 | 相关名义额 ≥ 约 **$50,000** | 丢弃 |
+| 数据可验证 | 相关观测非 `NOT_VERIFIED` / `STALE` | 转入 `data_gap`，不发布 |
+| 证据完整 | 原值、基线/对照组、样本量、`market_session`、规则名、确认次数齐全 | 不可发布 |
+| 冷启动（仅 `T*`） | 同 session 快照 ≥ 14 | 只记录不发布 |
+| 连续确认（仅 `T*`） | 1 次 → `TENTATIVE`；2 次 → `PUBLISHED` | 停留在 `TENTATIVE` |
+
+`X*` 横截面族**可即时发布**，但前端文案必须写「同组现状异常」，不得写成「相对历史升温」——
+它根本没有读过历史。两族的发布语义分离是硬约束，见 `adr/0005-two-detector-families.md`。
+
+**管理层可见面**（决策首页、每日邮件）在发布门之上再加一层：仅 `high` / `critical`，
+且证据完整率必须是 100%。异常雷达工作队列可以看到 `TENTATIVE` 与更低严重度，但要显式标注置信度。
+
+### 9.2 告警状态机
+
+```
+DETECTED ──(发布门)──> TENTATIVE ──(第 2 次确认)──> PUBLISHED
+                            │                          │
+                            └──────────┬───────────────┘
+                                       ▼
+                                    CLAIMED ──> IN_REVIEW ──> ACTIONED ──> RESOLVED
+                                       │
+                任意阶段 ──> FALSE_POSITIVE | DISMISSED（必须记录原因）
+```
+
+- `DETECTED` 只存在于系统内部，**永不出现在任何界面或 API 响应里**。
+- 状态迁移写 `alert_action` + `audit_log`，同事务提交。审计写失败即整个动作失败。
+- `RESOLVED` 前必须有复盘：最终结论、是否真实需求、影响了什么决策、误报原因、阈值建议。
+- **数据修复不覆写历史告警**：修好数据后要么给原告警追加一个证据版本，要么产生一条新告警。
+  昨天基于错误数据发出的告警，历史上确实发生过。
+- `FALSE_POSITIVE`（系统判断错了）与 `DISMISSED`（系统对了但业务选择不动）是两回事，
+  混为一谈会让误报率这个指标失去意义。
+
+理由见 `adr/0008-alerts-are-business-objects.md`。
+
+### 9.3 从告警到发行候选
+
+`research_task` 与 `issuance_candidate` 都通过 `alert_id` 反向关联到触发它们的告警——
+「信号 → 研究任务转化率」这个成功指标只有在这条关联存在时才是可算的。
+
+发行评估五道门（发现 → 数据确认 → 小规模验证 → 可行性评估 → 产品委员会）记在 `candidate_gate_log`，
+每道门有进入条件、降级条件、owner 与产出物。
+
+**没有任何分数可以推动一道门。** severity、热力图色阶、四象限位置只用于排序和优先级；
+合规、对冲、做市、客户需求与产品委员会是系统之外的独立审批。见 `adr/0009-no-composite-approval-score.md`。
+
+---
+
+## 10. 版本（Edition）与不可变发布
+
+| Edition | 生成 | 可变性 |
+|:--|:--|:--|
+| `LIVE` | 每小时刷新 | 可变；页面必须显示 snapshot 时间、数据年龄、下次刷新与部分源延迟 |
+| `MORNING` | 每日 09:00 HKT 冻结 | **不可变** |
+| `AFTERNOON` | 每日 17:00 HKT 冻结 | **不可变** |
+
+- 冻结版一次写定。迟到或更正数据产生 `v2` / `v3` **修订版**，带修订原因与前后差异，
+  被取代的版本仍然可读、可访问。**永不 `UPDATE` 已冻结的 edition。**
+- 所有页面 URL、导出和分享链接固定 `edition` 与 `as_of`；切换 edition 时保留其它仍然合法的筛选。
+- `as_of`（数据截止）与 `generated_at`（生成时刻）分别展示。把两者混为一谈会让报告显得比它的输入更新鲜。
+- **分享版**是脱敏后的只读冻结版：服务端裁掉候选、owner、处理动作、业务备注、发行状态、阈值配置
+  与未公开源细节；前端隐藏不算脱敏。保留公开市场证据、口径说明、`as_of` 与版本号。
+
+理由见 `adr/0007-editions-and-the-frozen-record.md`。
+
+---
+
+## 11. API
 
 统一挂在 `settings.normalized_api_base_path` 下。
 
+所有响应统一携带上下文元数据：`scope`、`edition`、`as_of`、`generated_at`、`data_age`、
+`coverage`、`verification`。**缺任一字段视为契约违规**——没有这些，一张截图六周后无法复现。
+
 ```
 GET  /api/health
-GET  /api/kpi/executive             五口径 KPI + 环比，严格分列
-GET  /api/data-quality              各模块 Available / Partial / NotVerified
 
+# 决策面
+GET  /api/executive                 一句话摘要 + 四问答案 + Top 机会/风险 + 五口径 KPI（严格分列）
+GET  /api/editions                  Live 与冻结版列表、修订链、导出链接
+GET  /api/editions/{id}             单个版本（含 as_of / generated_at / version / is_immutable）
+GET  /api/search                    统一搜索：underlying / asset / issuer / venue / pair / contract / theme
+
+# 告警工作队列
+GET  /api/alerts                    队列（status/severity/family/detector/scope/session/owner/theme/quality）
+GET  /api/alerts/{id}               单条告警 + 完整证据链 + 反证 + 时间线 + 相邻异常
+POST /api/alerts/{id}/actions       认领 / 转派 / 备注 / 确认 / 判误 / 搁置 / 关闭（写审计）
+POST /api/alerts/{id}/research-tasks  由告警创建研究任务（保留 alert_id 关联）
+
+# 研究与发行
+GET  /api/underlyings/{id}          底层 360 全景
+GET  /api/themes                    主题需求（primary / secondary 分列）
+GET  /api/themes/versions           主题版本与映射审核记录
+GET  /api/coverage                  市场需求 × 自有产品覆盖矩阵（四态）
+GET  /api/candidates                发行候选与评估门状态
+POST /api/candidates/{id}/gates     推进 / 降级一道评估门（人工决策，写审计）
+GET  /api/launch-windows            新产品 1h / 6h / 24h 生命周期快照与阶段结论
+
+# 市场结构（P1 保留页）
 GET  /api/scale/categories          五类 + 去重并集（带 is_additive）
 GET  /api/spot/venues               场所排名（raw / adjusted 并列）
 GET  /api/spot/pairs                交易对下钻（venue / issuer / underlying / tier 筛选）
 GET  /api/dex/pools                 DEX 池（含 buys / sells）
-
-GET  /api/issuers                   发行商对比
+GET  /api/issuers                   发行商对比（R1 嵌入用，R2 独立页）
 GET  /api/issuers/{id}/venues       发行商 × 场所矩阵
-
 GET  /api/perps/venues              跨所永续（含 HIP-3 perp DEX）
 GET  /api/perps/contracts           合约级排名
 GET  /api/perps/dexs                HIP-3 permissionless DEX 列表
+GET  /api/timeseries                通用时序（entity_type / entity_id / metric / range / session）
 
-GET  /api/themes                    主题需求排名
-GET  /api/alerts                    告警流（severity / family / detector / since）
-GET  /api/alerts/{id}               单条告警 + 完整证据链
-GET  /api/underlying/{id}           底层证券 360 全景
-GET  /api/timeseries                通用时序（entity_type / entity_id / metric / range）
-
+# 治理
+GET  /api/quality                   源健康 / 实体覆盖 / 映射 / Raw-Adjusted 差异 / 验证 / 基线健康
+GET  /api/quality/gaps              数据缺口队列（owner / SLA / 修复状态）
+POST /api/quality/gaps/{id}/actions 分派与状态推进（写审计）
 GET  /api/reports
-GET  /api/reports/{date}/excel
-GET  /api/reports/{date}/word
+GET  /api/reports/{edition_id}/excel
+GET  /api/reports/{edition_id}/word
 POST /api/reports/generate
 ```
 
-`/api/underlying/{id}` 返回结构：
+`/api/underlyings/{id}` 由 v2.0 的 `/api/underlying/{id}` 更名而来（资源名统一复数）。
+旧路径保留一个版本作为别名并在响应头标注弃用，之后移除。
+
+`/api/underlyings/{id}` 返回结构：
 
 ```json
 {
@@ -298,60 +439,109 @@ POST /api/reports/generate
 }
 ```
 
+### 11.1 统一数值对象
+
+任何可展示的数值都以同一个信封返回，而不是裸 float：
+
+```json
+{
+  "value": 362076.0,
+  "unit": "USD",
+  "metric_scope": "spot_volume",
+  "metric_dimension": "flow",
+  "raw_value": 362076.0,
+  "adjusted_value": 361204.0,
+  "verification_status": "VERIFIED",
+  "observed_at": "2026-08-26T09:00:00+08:00",
+  "window": "24h",
+  "source_count": 3,
+  "weight_basis": null
+}
+```
+
+- `metric_dimension = ratio` 时 `weight_basis` **必填**，缺失的 ratio 聚合请求由后端拒绝，不给默认值。
+- `verification_status ∈ {VERIFIED, PARTIAL, NOT_VERIFIED, STALE, EMPTY}`。
+  `EMPTY` 是观测到的真零，可以按零陈述；`NOT_VERIFIED` 不得渲染成任何数字。
+- 后端拒绝非法跨 scope 聚合，前端图表组件再断言一次。图表数据也可能来自前端本地推导，两侧都要做。
+
+### 11.2 权限与分享
+
+五种角色：`VIEWER`（内部只读）、`ANALYST`（备注 / 确认 / 判误 / 建研究任务）、
+`OWNER`（认领 / 转派 / 推进 / 关闭）、`ADMIN`（源、阈值、映射、主题审核、权限）、
+`SHARE_VIEWER`（脱敏冻结版只读）。
+
+脱敏在**服务端裁字段**，不是前端隐藏；无权限响应不得泄露记录是否存在。
+
 ---
 
-## 10. 前端
+## 12. 前端
 
 React 18 + TypeScript + Webpack + antd 5 + framer-motion + lucide-react + **ECharts**。
 
 视觉遵循 `DESIGN.md`（不修改该文件）。图表规范在 `docs/DATAVIZ.md`，其色值全部从 `DESIGN.md` 现有 token 派生；
 两文件冲突时以 `DESIGN.md` 的 token 体系为准。版式细则见 `docs/UI-LAYOUT.md`。
 
-10 个页面收敛为 4 个版式模板：
+页面收敛为 5 个版式模板：
 
 | 模板 | 骨架 | 页面 |
 |:--|:--|:--|
-| **T1 概览** | 液态背景 + Greeting Hero + KPI 带 + 双栏(2fr/1fr) | Overview |
-| **T2 榜单** | 筛选条 + 主图(Hero) + 明细表 | Spot Scale · Venues · Issuers · Perps · Themes |
-| **T3 详情** | 实体头 + 指标卡组 + 按口径分栏多图 + 明细表 | Underlying 360 · Perp Contract |
-| **T4 流水** | 时间轴 + 右侧证据抽屉 | Anomaly Radar · Data Quality |
+| **T1 决策** | 状态条 + 一句话摘要 + 四问卡 + Top 机会/风险 + 五 KPI + 证据图组 + 快速下钻 | 决策首页 |
+| **T2 榜单** | 筛选条 + 主图(Hero) + 明细表 | 现货规模 · 场所 · 永续 · 主题需求 |
+| **T3 详情** | 实体头 + 按口径分栏指标 + 多图 + 明细表 | Underlying 360 · Perp Contract |
+| **T4 队列** | 队列摘要 + 多维筛选 + 工作列表 + 证据/处理抽屉 | 异常雷达 · 数据质量 |
+| **T5 版本** | 版本列表 + 摘要 + 修订链 + 导出 | 报告与复盘 |
 
 T3 的「按口径分栏」是硬约束的版式化：不同 `MetricScope` 物理上分在不同卡片内，
 使跨口径相加在版面上就不成立。
 
-导航为左侧 72px 图标 rail，分四组：总览 / 市场 / 永续 / 需求 / 运维。
-顶栏常驻数据时间戳。
+T4 从 v2.0 的「时间轴流水」升级为**工作队列**：告警是可认领、可推进、可复盘的业务对象，
+时间轴只是它的一种排序方式。
+
+导航为左侧 **200px 常驻展开 rail**，按业务闭环分四组：**决策 / 研究 / 市场结构 / 治理**，P0 页面置顶。
+顶部全局工具区常驻：统一搜索、scope、edition、时间窗、语言、明暗、用户菜单，
+以及当前 snapshot 时间与数据年龄。
+
+**搜索不再是首页主角**（v2.0 的 Greeting Hero + 搜索框已废弃）：首页 Hero 是一句话业务结论，
+搜索移入全局工具区，命中直接进入对应实体页。版式细则见 `docs/UI-LAYOUT.md`。
 
 ---
 
-## 11. 报告
+## 13. 报告
 
+- **报告从冻结版生成**，不从 Live 生成。每份报告绑定一个 `edition_id`，可回放到当时的 `as_of`。
 - **xlsx（22 sheet，openpyxl）**：在原 19 sheet 基础上新增
   `16_HL_HIP3_Contracts`、`17_Liquidity_Quality`、`18_Theme_Demand`；
   `01_Asset_Master` 等表增加 `rwa_tier` 列。
-- **docx（python-docx）**：分析报告，新增「异常告警摘要」一章。
+- **docx（python-docx）**：分析报告，含「异常告警摘要」与「处理与复盘」两章。
 - **Excel 保持朴素**：无条件格式、无内嵌图表、无合并单元格，保证可直接复制与二次加工。
   可视化只在 Web 端。
+- **网页导出继承上下文**：筛选、排序、edition、`as_of`、时区、scope、Raw/Adjusted、验证状态一并带出。
 - 产物写对象存储（TOS）或数据库，**不落容器文件系统**。
 
 ---
 
-## 12. 调度
+## 14. 调度
 
 APScheduler，时区 HKT。
 
 ```
 每 15 分钟   headline 快照（Binance TradFi ticker、Hyperliquid metaAndAssetCtxs）
 每  1 小时   现货 Top 50 + GeckoTerminal 池 + Hyperliquid perpDexs
+             → 刷新 LIVE edition（写 snapshot 时间与数据年龄）
 每  6 小时   长尾现货、类别口径、发行商官网产品数
 每日 06:30   Alpaca 底层参考价（美股收盘后）
-每日 08:00   生成 xlsx + docx 报告并推送
-每日 03:00   基线重算、冷数据归档
+每日 09:00   冻结 MORNING edition（不可变）
+每日 17:00   冻结 AFTERNOON edition（不可变）
+每日 17:15   生成 xlsx + docx 报告，发送每日邮件摘要（可配置）
+每日 03:00   基线重算、冷数据归档、SLA 超时扫描
+按需        新产品 1h / 6h / 24h 生命周期窗口快照（以上市时间为锚）
 ```
+
+冻结任务失败必须告警且**不得静默顺延**：一个没有 09:00 版本的早晨，比一个晚到的 09:00 版本更容易被发现。
 
 ---
 
-## 13. 技术栈与目录
+## 15. 技术栈与目录
 
 | 层 | 选型 |
 |:--|:--|
@@ -367,39 +557,53 @@ APScheduler，时区 HKT。
 ```
 backend/app/
 ├── main.py                  create_app() 装配
-├── api/routes/              health kpi scale spot dex issuers perps themes alerts
-│                            underlying timeseries reports quality
+├── api/routes/              health executive editions search alerts underlyings themes
+│                            coverage candidates launch_windows scale spot dex issuers
+│                            perps timeseries quality reports
 ├── core/                    config.py  metrics.py  sessions.py
 ├── db/                      session.py  base.py
-├── models/                  dim_* / fact_* / alert / registry
-├── schemas/                 Pydantic 出入参
+├── models/                  dim_* / fact_* / alert / workflow / edition / registry
+├── schemas/                 Pydantic 出入参（含统一数值对象 value.py）
 └── services/
     ├── ingest/              coingecko geckoterminal hyperliquid binance alpaca issuer_official
-    ├── normalize/           dedup underlying_map tiering quality venue_registry
+    ├── normalize/           dedup underlying_map tiering quality venue_registry theme_map
     ├── analytics/           rollups concentration baseline
-    ├── anomaly/             engine.py scoring.py detectors/（17 个）
+    ├── anomaly/             engine.py scoring.py publication.py detectors/（17 个）
+    ├── workflow/            alert_lifecycle.py research_task.py candidate.py coverage.py
+    │                        data_gap.py audit.py
+    ├── editions/            freeze.py revision.py redaction.py
     ├── report/              excel.py word.py
     └── scheduler.py
 ```
 
 ---
 
-## 14. 分期交付
+## 16. 交付计划
 
-各期以「可独立产出一份完整交付物」为切分依据，而非技术分层。
+v2.0 的 P0–P3 已交付管道、口径系统、检测器与首版页面。R1 在其上按**工作流**切分，
+依赖关系比技术分层更能决定并行度：
 
-| 期 | 内容 | 期末交付物 |
+| 工作流 | 主要交付 | 前置 |
 |:--|:--|:--|
-| **P0** | 全量建表 · 口径类型系统 · CoinGecko + Hyperliquid 采集 · underlying 映射 + rwa_tier · 22-sheet xlsx 导出 · 前端 T1 + T2 · **末尾启动定时快照** | 自动复刻并扩展现有工作簿 |
-| **P1** | 全量调度 · `market_session` 分层基线 · `fetch_log` / NOT_VERIFIED 全链路 · **横截面族 X1–X7** · 数据质量页 | 首次可看趋势；异常检测首批上线 |
-| **P2** | **时序族 T1–T10** · `alert` + `alert_evidence` · 告警页与证据抽屉 · docx 报告 | 核心检测能力完整 |
-| **P3** | 流动性质量 / 滑点（依赖 `l2Book` 积累）· 主题需求排名 · `dim_benchmark` 对照 · Loris · CEX/DEX 补充源 | 深度分析 |
+| **A. 数据契约** | 统一数值对象 · scope 校验 · edition 模型 · evidence/反证字段 · underlying 与 theme 实体版本化 | 数据字典与迁移 |
+| **B. 检测与状态机** | 发布门 · 连续确认 · 告警状态机与动作 · 审计 | A |
+| **C. 决策首页** | 状态条 · 一句话摘要 · 四问卡 · Top 机会/风险 · 五 KPI · 首批证据图 | A + B |
+| **D. 深度研究** | Underlying 360 · 主题需求 · 覆盖缺口矩阵 · 发行候选与评估门 | A |
+| **E. 治理** | 数据质量与缺口队列 · 冻结版与修订 · 报告 · 权限 · 分享脱敏 · 邮件摘要 | A + B |
+| **F. 联调验收** | 四个端到端场景 · 口径契约测试 · 性能 / 权限 / 可访问性 · 回归 | A–E |
 
-定时快照必须在 P0 末即启动。基线需要 14 个同 session 快照，晚开一天，P2 就要多等一天。
+R1 验收场景（沉寂标的放量 / Raw 高但 Adjusted 近零 / 份额迁移 / 新产品 1h-6h-24h）
+与逐条需求编号见 `docs/REQUIREMENTS-R1.md`。
+
+**R2**：港股 / 韩国 / 商品 session 日历 · 独立发行商竞争页 · Teams/Slack 通知 ·
+Loris 正式接入（取决于 API）· 更完整的客户与渠道验证记录 · 移动端处理优化。
+
+**R3**：阈值自适应建议 · 主题演化 · 跨信号关联 · 组合级覆盖缺口 · 产品机会回测。
+即便如此，人工审批与证据可解释性仍然保留——见 `adr/0009-no-composite-approval-score.md`。
 
 ---
 
-## 15. 已知边界
+## 17. 已知边界
 
 | 事项 | 状态 | 说明 |
 |:--|:--|:--|
@@ -411,6 +615,21 @@ backend/app/
 | xStocks 覆盖 | ⚠️ 偏低 | 官方 640 产品 vs CoinGecko 索引 113；以官方主表做分母 |
 | Alpaca IEX | ⚠️ 非 SIP | 仅方向性校验，不作套利结论 |
 | bStocks 性质 | ⚠️ 凭证 | 凭证化工具而非直接持股，UI 须标注 |
+| 港股 / 韩国 / 商品 session 日历 | ❌ R1 不做 | 仅美股 session 完整；其余标的按 `CLOSED_*` 保守分层，接口预留 |
+| Polymarket 预测概率 | ⚠️ 仅背景 | 不进入 RWA 汇总、告警或发行判断，只作叙事参考 |
+| 自有产品主表权威系统 | ⚠️ 待确认 | 覆盖缺口计算依赖 `dim_own_product`，其权威来源与维护人在上线前确认 |
+| high/critical 精确阈值 | ⚠️ 待校准 | 约 $50k 是当前统一下限；首月回测后按 detector 逐个校准，例外须可追溯 |
+
+### 17.1 上线前业务确认（不阻断设计与开发）
+
+- 正式 owner 名单、角色映射，以及「1 个工作日内认领」这条 SLA 的责任归属。
+- 每日邮件的接收组与最终发送时间（当前默认 17:15 HKT）。
+- 首月回测后 high / critical 的精确阈值与各 detector 的例外。
+- 自有产品主表的权威系统、覆盖状态维护人，以及「竞品先发」的判定口径。
+- 分享版的组织级脱敏清单与保留期限。
+
+这五项都不阻断当前设计与开发：它们改的是配置与阈值，不是结构。
+但每一项在上线前都必须有名字和日期，否则「谁来处理这条告警」在第一天就没有答案。
 
 ---
 
@@ -473,8 +692,35 @@ Hyperliquid 官方 API 免费、无鉴权地提供其完整合约级数据。
 这使早期设计中「Loris 完整合约历史 ❌ 无，需 API Key」这一最大缺口大部分被填补，
 并导致永续主源从 Loris 改为 Hyperliquid 官方 API。见 `docs/adr/0003-hyperliquid-as-primary-perp-source.md`。
 
-### A.7 三条不可让步的原则
+### A.7 五条不可让步的原则
 
 1. **口径不可相加** —— 代码强制，不靠人记得。
 2. **Not verified ≠ 0** —— 取不到就是取不到，UI 灰色占位。
 3. **告警必须可解释** —— 每条都能点开看到原始值、基线、样本量、规则名。
+4. **冻结版不可变**（R1 新增）—— 更正生成修订版，旧版本仍可读。
+   否则「上午那份报告」会变成一个没有确定内容的说法。
+5. **没有分数可以批准任何事**（R1 新增）—— 系统负责发现、排序与保全证据；
+   合规、对冲、做市、客户需求与产品委员会是独立审批门。
+
+### A.8 R1 为什么是重构而不是改版
+
+v2.0 交付后暴露的不是视觉问题，是结构问题：
+
+- 首页以问候和搜索为 Hero，第一屏回答不了「发生了什么、是否可信、要不要行动」。
+- KPI、排名、告警各自成块，读者要自己拼因果——这正是把不同口径数字相加的起点。
+- 异常页是技术列表：没有 owner、没有业务备注、没有判误、没有研究任务、没有结论与复盘。
+  一条没人负责的告警，第二天就等于没发生过。
+- 静态 Top N 太多：看得见「大」，看不见「正在变」。
+- 缺统一的 Underlying 360：同一底层的包装、发行商、场所、永续与告警无法在一处闭环。
+- 数据质量与业务结论分离：未验证值可能被当成 0，原始量可能掩盖质量调整后的结果。
+
+因此 R1 保留全部数据能力，重组业务链路：首页按四个业务问题组织，
+告警升级为有状态机和审计的业务对象，结论固化为版本。
+
+### A.9 需求来源与追溯
+
+- 客户原始需求：《RWA 看板客户需求梳理》，2026-08-18。
+- PRD v2.0《RWA 产品决策雷达》，2026-08-26 —— 本轮重构的直接输入，含 25 项已确认决策。
+  源文件为 docx，按 `.gitignore` 规则不入库；其规范性内容已拆进本文、`CONTEXT.md`、
+  `docs/REQUIREMENTS-R1.md`、`docs/UI-LAYOUT.md` 与 `docs/DATAVIZ.md`。**以仓库内文档为准。**
+- 客户现有 Prediction Signal Radar 的 RWA Live 页面及其证据呈现方式。

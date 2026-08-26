@@ -18,12 +18,8 @@ import type { EChartsOption } from 'echarts';
 
 import type { MetricScope } from '@/api/types';
 import { useI18n } from '@/i18n';
-import {
-  assertSeriesLimit,
-  assertSingleScope,
-  axisTitle,
-  type SeriesSpec,
-} from './guards';
+import { useLabels } from '@/i18n/labels';
+import { assertSeriesLimit, assertSingleScope, type SeriesSpec } from './guards';
 import {
   baseOption,
   disabledColor,
@@ -45,14 +41,15 @@ export function BarRanking({
   scope,
   height = 360,
 }: BarRankingProps) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
+  const label = useLabels();
 
   const option = useMemo<EChartsOption>(() => {
     assertSingleScope(series);
     assertSeriesLimit(series);
 
     const notVerified = t('common.notVerified', '未验证');
-    const title = axisTitle(scope, locale);
+    const title = label.scope(scope);
 
     const observed = series
       .flatMap((s) => s.values)
@@ -132,7 +129,7 @@ export function BarRanking({
         ),
       })),
     } as EChartsOption;
-  }, [categories, series, scope, t, locale]);
+  }, [categories, series, scope, t, label]);
 
   return (
     <ReactECharts

@@ -14,7 +14,8 @@ import type { EChartsOption } from 'echarts';
 
 import type { MetricScope } from '@/api/types';
 import { useI18n } from '@/i18n';
-import { assertSameAxis, axisTitle } from './guards';
+import { useLabels } from '@/i18n/labels';
+import { assertSameAxis } from './guards';
 import { baseOption, categoricalPalette, usdAxisFormatter } from './theme';
 
 export interface DualScopeChartProps {
@@ -32,13 +33,14 @@ export function DualScopeChart({
   right,
   height = 360,
 }: DualScopeChartProps) {
-  const { t, locale } = useI18n();
+  const { t } = useI18n();
+  const label = useLabels();
 
   const option = useMemo<EChartsOption>(() => {
     assertSameAxis([left.scope, right.scope]);
     const palette = categoricalPalette();
-    const leftTitle = axisTitle(left.scope, locale);
-    const rightTitle = axisTitle(right.scope, locale);
+    const leftTitle = label.scope(left.scope);
+    const rightTitle = label.scope(right.scope);
 
     return {
       ...baseOption(),
@@ -114,7 +116,7 @@ export function DualScopeChart({
         },
       ],
     } as EChartsOption;
-  }, [categories, left, right, t, locale]);
+  }, [categories, left, right, t, label]);
 
   return (
     <ReactECharts

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
+from enum import Enum
 
 from pydantic import BaseModel, Field
 
@@ -13,12 +14,18 @@ from app.models.enums import (
     AlertSeverity,
     AlertStatus,
     AssetClass,
+    CoverageState,
     DetectorFamily,
     EntityType,
     RwaTier,
     VenueType,
 )
 from app.schemas.common import Amount, Meta
+
+# Underlying 360 answers "where do we stand on this one" as well as "what is it
+# doing", so it reuses the business-layer row shapes rather than restating them.
+# One-way dependency: ``workflow`` knows nothing about this module.
+from app.schemas.workflow import CandidateRow, CoverageRow, DataGapRow
 
 
 class Kpi(BaseModel):
@@ -307,6 +314,27 @@ class PerpExposureRow(BaseModel):
     open_interest_usd: Amount
 
 
+class FirstListingRow(BaseModel):
+    """Who wrapped this underlying first, and when we first saw it.
+
+    ``first_seen_at`` is exactly that — the first observation, not an announced
+    listing date, which no free source publishes. Named for what it is so nobody
+    quotes it as a launch date in a competitive brief.
+    """
+
+    asset_id: str
+    symbol: str
+    issuer_id: str | None = None
+    issuer: str | None = None
+    first_seen_at: datetime
+    #: True when the row was measured from a launch-window snapshot rather than
+    #: inferred from when the wrapper entered our catalogue.
+    is_measured: bool = False
+    #: How many venues had listed it by the end of the launch window. One venue is a
+    #: listing; five is demand.
+    venue_count: int | None = None
+
+
 class Underlying360(BaseModel):
     """Everything known about one real-world security, by scope."""
 
@@ -327,6 +355,68 @@ class Underlying360(BaseModel):
     perp_oi_usd: Amount
     scope_note: str
     active_alerts: list[AlertRow]
+
+    # --- U360-003: where we stand on this underlying ---------------------------
+    #: Our shelf position. Null means no coverage row has been assessed yet, which
+    #: is not the same as an assessed gap.
+    our_coverage: CoverageRow | None = None
+    #: Open issuance candidates naming this underlying, with their readiness columns.
+    candidates: list[CandidateRow] = Field(default_factory=list)
+    #: Open data gaps scoped to it. A 360 page that looks complete while a blocking
+    #: gap is open is the failure mode this list exists to prevent.
+    open_data_gaps: list[DataGapRow] = Field(default_factory=list)
+    #: Competitor wrappers in first-seen order — who got there before us.
+    first_listings: list[FirstListingRow] = Field(default_factory=list)
+
+
+class UnderlyingSort(str, Enum):
+    """The prepared orderings of the catalogue.
+
+    An enum rather than a column name because each entry names exactly one scope.
+    A free-form ``sort_by`` would let a caller order market cap by perpetual open
+    interest and read the result as a ranking of the same thing.
+    """
+
+    SPOT_VOLUME = "spot_volume"
+    SPOT_MARKET_CAP = "spot_market_cap"
+    PERP_VOLUME = "perp_volume"
+    PERP_OI = "perp_oi"
+    NAME = "name"
+
+
+class UnderlyingRow(BaseModel):
+    """One line of the catalogue — the drill-down source for Underlying 360."""
+
+    underlying_id: str
+    name: str
+    asset_class: AssetClass
+    region: str | None = None
+    is_pre_ipo: bool = False
+    theme_id: str | None = None
+    #: How many tokenized wrappers, distinct issuers and venues carry it. The three
+    #: counts are what turn a symbol into a market: one issuer on one venue is a
+    #: listing, four issuers across nine venues is competition.
+    wrapper_count: int = 0
+    issuer_count: int = 0
+    venue_count: int = 0
+    has_perp: bool = False
+    spot_market_cap: Amount
+    #: Both figures, always. Neither one alone is publishable (rule 5).
+    spot_vol_raw: Amount
+    spot_vol_adjusted: Amount
+    perp_vol_24h: Amount
+    perp_oi_usd: Amount
+    #: Published, unresolved alerts naming this underlying.
+    open_alert_count: int = 0
+    #: Our shelf state, where one has been assessed.
+    coverage_state: CoverageState | None = None
+
+
+class UnderlyingList(BaseModel):
+    meta: Meta
+    #: Echoed back so a shared URL and its response cannot disagree about the order.
+    sort: UnderlyingSort
+    rows: list[UnderlyingRow]
 
 
 class TimeseriesPoint(BaseModel):

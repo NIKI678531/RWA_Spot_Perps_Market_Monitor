@@ -14,7 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Callable, Sequence
@@ -24,8 +24,15 @@ from sqlalchemy.orm import Session
 
 from app.core.sessions import classify_session
 from app.models.alerts import Alert, AlertEvidence
-from app.models.enums import AlertStatus, DetectorFamily
-from app.services.anomaly import observations
+from app.models.enums import (
+    CLOSED_ALERT_STATES,
+    AlertActionType,
+    AlertState,
+    AlertStatus,
+    DetectorFamily,
+)
+from app.models.workflow import AlertAction
+from app.services.anomaly import observations, publication
 from app.services.anomaly.detectors import x1_cross_sectional_turnover as x1
 from app.services.anomaly.detectors import x2_buy_sell_imbalance as x2
 from app.services.anomaly.detectors import x3_vol_liq_ratio_extreme as x3
@@ -63,10 +70,26 @@ class EngineResult:
     created: list[Alert]
     updated: list[Alert]
     suppressed: list[tuple[Signal, str]]
+    #: Findings that survived the detector gates and then failed the publication
+    #: gate. They are stored — the row exists, in state DETECTED — but never
+    #: rendered. Kept separate from ``suppressed`` because the two are different
+    #: failures: suppressed means "not worth alerting on", withheld means "worth
+    #: alerting on once the data supports it".
+    withheld: list[tuple[Alert, publication.PublicationVerdict]] = field(
+        default_factory=list
+    )
 
     @property
     def alert_count(self) -> int:
         return len(self.created) + len(self.updated)
+
+    @property
+    def published_count(self) -> int:
+        return sum(
+            1
+            for alert in (*self.created, *self.updated)
+            if alert.state is not AlertState.DETECTED
+        )
 
 
 class AnomalyEngine:
@@ -106,6 +129,7 @@ class AnomalyEngine:
         created: list[Alert] = []
         updated: list[Alert] = []
         suppressed: list[tuple[Signal, str]] = []
+        withheld: list[tuple[Alert, publication.PublicationVerdict]] = []
 
         for signal in signals:
             gate = check_gates(signal)
@@ -122,19 +146,65 @@ class AnomalyEngine:
                 alert = _extend_alert(existing, signal, snapshot_ts)
                 updated.append(alert)
 
-            session.add(_build_evidence(alert, signal, snapshot_ts))
+            evidence = _build_evidence(alert, signal, snapshot_ts)
+            session.add(evidence)
 
-        return EngineResult(created=created, updated=updated, suppressed=suppressed)
+            # Detection is not publication. The row above exists either way; whether
+            # anyone ever sees it is decided here and only here.
+            verdict = publication.evaluate(
+                signal,
+                evidence,
+                confirmation_count=alert.confirmation_count,
+            )
+            was_unpublished = alert.published_at is None
+            publication.apply(alert, evidence, verdict, now=snapshot_ts)
+
+            if not verdict.publishable:
+                withheld.append((alert, verdict))
+            elif was_unpublished:
+                session.add(
+                    AlertAction(
+                        alert=alert,
+                        action=AlertActionType.PUBLISH,
+                        from_state=AlertState.DETECTED,
+                        to_state=alert.state,
+                        actor_kind="system",
+                        note=publication.family_prefix(signal.family),
+                    )
+                )
+            else:
+                session.add(
+                    AlertAction(
+                        alert=alert,
+                        action=AlertActionType.CONFIRM,
+                        actor_kind="system",
+                        note=(f"第 {alert.confirmation_count} 次同时段确认"),
+                    )
+                )
+
+        return EngineResult(
+            created=created,
+            updated=updated,
+            suppressed=suppressed,
+            withheld=withheld,
+        )
 
 
 def _find_open_alert(
     session: Session, dedup_key: str, snapshot_ts: datetime
 ) -> Alert | None:
-    """The same condition seen inside the cooldown window, if any."""
+    """The same condition seen inside the cooldown window, if any.
+
+    Closed alerts are excluded, so a condition that re-fires after someone dismissed
+    it raises a *new* alert rather than reopening the closed one. Reopening would
+    quietly rewrite a decision somebody recorded, and the retrospective attached to
+    it would then describe an event that kept happening afterwards.
+    """
     stmt = (
         select(Alert)
         .where(Alert.dedup_key == dedup_key)
         .where(Alert.status != AlertStatus.RESOLVED)
+        .where(Alert.state.notin_(tuple(CLOSED_ALERT_STATES)))
         .where(Alert.last_seen_ts >= snapshot_ts - COOLDOWN)
         .order_by(Alert.last_seen_ts.desc())
         .limit(1)
@@ -157,6 +227,9 @@ def _create_alert(signal: Signal, snapshot_ts: datetime) -> Alert:
         # A single snapshot is not yet a finding. Confirmation costs one more
         # snapshot and removes most one-off data artefacts.
         status=AlertStatus.TENTATIVE,
+        # Nothing is visible until the publication gate says so.
+        state=AlertState.DETECTED,
+        confirmation_count=1,
         headline_zh=signal.headline_zh,
         first_seen_ts=snapshot_ts,
         last_seen_ts=snapshot_ts,
@@ -167,6 +240,7 @@ def _create_alert(signal: Signal, snapshot_ts: datetime) -> Alert:
 def _extend_alert(alert: Alert, signal: Signal, snapshot_ts: datetime) -> Alert:
     """Fold a repeat firing into the existing alert rather than filing a new one."""
     alert.occurrence_count += 1
+    alert.confirmation_count += 1
     alert.last_seen_ts = snapshot_ts
     alert.headline_zh = signal.headline_zh
 
