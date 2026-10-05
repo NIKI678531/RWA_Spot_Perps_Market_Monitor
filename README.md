@@ -24,7 +24,7 @@
 |:--|:--|
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | **权威架构设计** —— 数据模型、异常引擎、发布门、版本、API、交付计划 |
 | [`docs/REQUIREMENTS-R1.md`](./docs/REQUIREMENTS-R1.md) | **R1 需求编号与验收标准**（PRD v2.0 的仓库内权威副本） |
-| [`DESIGN.md`](./DESIGN.md) | UI 设计系统（CSOP 玻璃拟态金融 UI 规范） |
+| [`DESIGN.md`](./DESIGN.md) | UI 设计系统 |
 | [`CLAUDE.md`](./CLAUDE.md) | Claude Code 工作指引 + 业务硬约束 |
 | [`AGENTS.md`](./AGENTS.md) | Agent 协作约定 |
 | [`CONTEXT.md`](./CONTEXT.md) | 领域术语表（口径、层级、告警状态、版本的唯一定义） |
